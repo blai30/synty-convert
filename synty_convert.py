@@ -1,0 +1,416 @@
+"""Convert Synty asset packs from FBX to Godot-ready GLB.
+
+Mirrors the source tree into the output directory, replacing every ``.fbx`` with a
+``.glb`` and copying all other files (textures, licenses) untouched. Materials reference
+the pack's shared texture atlas rather than embedding a copy of it.
+
+    python synty_convert.py --packs POLYGON_BattleRoyale ANIMATION_Base
+
+Conversion itself runs inside Blender; see ``blender_convert.py``. Work is spread over a
+pool of Blender processes, each handling many files per launch so the startup cost is
+paid once per worker rather than once per file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import collections
+import fnmatch
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from pathlib import Path
+
+RESULT_PREFIX = "@@RESULT "
+WORKER_SCRIPT = Path(__file__).with_name("blender_convert.py")
+OVERRIDES_FILE = Path(__file__).with_name("texture_overrides.json")
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import texture_matching
+
+BLENDER_CANDIDATES = [
+    "blender",
+    r"C:\Program Files\Blender Foundation\Blender 5.2\blender.exe",
+    r"C:\Program Files\Blender Foundation\Blender 4.5\blender.exe",
+    "/Applications/Blender.app/Contents/MacOS/Blender",
+]
+
+
+@dataclass
+class Job:
+    src: Path
+    dst: Path
+    pack: str = ""
+
+
+@dataclass
+class Totals:
+    converted: int = 0
+    failed: int = 0
+    skipped: int = 0
+    copied: int = 0
+    src_bytes: int = 0
+    dst_bytes: int = 0
+    copied_bytes: int = 0
+    grew: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+    failures: list = field(default_factory=list)
+    materials: dict = field(default_factory=dict)
+
+
+def find_blender(explicit):
+    for candidate in filter(None, [explicit, os.environ.get("BLENDER")] + BLENDER_CANDIDATES):
+        resolved = shutil.which(candidate) or (candidate if Path(candidate).is_file() else None)
+        if resolved:
+            return resolved
+    sys.exit("Blender not found. Pass --blender <path> or set the BLENDER environment variable.")
+
+
+def human(num_bytes):
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if abs(size) < 1024.0 or unit == "GB":
+            return f"{size:,.1f} {unit}"
+        size /= 1024.0
+
+
+def pack_of(path, source_root):
+    """The top-level pack directory a file belongs to."""
+    relative = path.relative_to(source_root)
+    return relative.parts[0] if len(relative.parts) > 1 else "."
+
+
+def discover(source_root, output_root, patterns):
+    """Split the source tree into FBX conversion jobs and verbatim copies."""
+    jobs, copies = [], []
+    for path in sorted(source_root.rglob("*")):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        if patterns and not any(fnmatch.fnmatch(pack_of(path, source_root), f"*{p}*") for p in patterns):
+            continue
+        relative = path.relative_to(source_root)
+        if path.suffix.lower() == ".fbx":
+            jobs.append(Job(path, output_root / relative.with_suffix(".glb"), pack_of(path, source_root)))
+        else:
+            copies.append(Job(path, output_root / relative, pack_of(path, source_root)))
+    return jobs, copies
+
+
+def pack_contexts(packs, source_root, output_root):
+    """Per-pack texture index and manual overrides, shared with every worker."""
+    overrides = {}
+    if OVERRIDES_FILE.exists():
+        overrides = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
+    contexts = {}
+    for pack in packs:
+        root = source_root / pack
+        contexts[pack] = {
+            "source_root": str(root),
+            "output_root": str(output_root / pack),
+            "textures": texture_matching.index_textures(root),
+            "overrides": {k: v for k, v in overrides.get(pack, {}).items() if not k.startswith("_")},
+        }
+    return contexts
+
+
+def is_current(job):
+    """True when the output already exists and is newer than its source."""
+    return job.dst.exists() and job.dst.stat().st_mtime >= job.src.stat().st_mtime
+
+
+def copy_assets(copies, force, totals):
+    for job in copies:
+        if not force and is_current(job):
+            continue
+        job.dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(job.src, job.dst)
+        totals.copied += 1
+        totals.copied_bytes += job.src.stat().st_size
+
+
+def run_worker(blender, jobs, options, contexts, on_result):
+    """Run one Blender process over a batch of jobs, streaming results as they arrive."""
+    handle, job_path = tempfile.mkstemp(suffix=".json", prefix="synty_")
+    with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        json.dump({"options": options, "packs": contexts,
+                   "jobs": [{"src": str(j.src), "dst": str(j.dst), "pack": j.pack} for j in jobs]}, stream)
+
+    command = [blender, "--background", "--factory-startup", "--python-exit-code", "1",
+               "--python", str(WORKER_SCRIPT), "--", job_path]
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                   text=True, encoding="utf-8", errors="replace", bufsize=1)
+        for line in process.stdout:
+            if line.startswith(RESULT_PREFIX):
+                on_result(json.loads(line[len(RESULT_PREFIX):]))
+        process.wait()
+        if process.returncode != 0:
+            on_result({"ok": False, "src": f"<worker batch of {len(jobs)}>", "dst": "",
+                       "error": f"Blender exited with code {process.returncode}"})
+    finally:
+        os.unlink(job_path)
+
+
+def chunk(jobs, count):
+    """Deal jobs round-robin so every worker gets a mix of large and small files."""
+    buckets = [jobs[i::count] for i in range(count)]
+    return [bucket for bucket in buckets if bucket]
+
+
+def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
+    done = 0
+    total = len(jobs)
+
+    def record(result):
+        nonlocal done
+        done += 1
+        if not result.get("ok"):
+            totals.failed += 1
+            totals.failures.append((result.get("src"), result.get("error", "").strip().splitlines()[-1:]))
+            print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
+            return
+        totals.converted += 1
+        totals.src_bytes += result["src_bytes"]
+        totals.dst_bytes += result["dst_bytes"]
+        pack = totals.materials.setdefault(result.get("pack", ""), {})
+        for material in result.get("materials", []):
+            entry = pack.setdefault(material["name"], dict(material, used_by=0, sources=set()))
+            entry["used_by"] += 1
+            entry["sources"].add(material["source"])
+        if result["dst_bytes"] >= result["src_bytes"]:
+            totals.grew.append((result["src"], result["src_bytes"], result["dst_bytes"]))
+        for warning in result.get("warnings", []):
+            totals.warnings.append(f"{Path(result['src']).name}: {warning}")
+        check = result.get("verify")
+        if check and not check.get("ok"):
+            totals.warnings.append(f"{Path(result['src']).name}: verification mismatch {check}")
+        if not quiet and (done % 25 == 0 or done == total):
+            ratio = 100.0 * (1 - totals.dst_bytes / max(totals.src_bytes, 1))
+            print(f"  [{done}/{total}] {human(totals.src_bytes)} -> {human(totals.dst_bytes)} ({ratio:.1f}% smaller)")
+
+    batches = chunk(jobs, workers)
+    with ThreadPoolExecutor(max_workers=len(batches)) as pool:
+        for batch in batches:
+            pool.submit(run_worker, blender, batch, options, contexts, record)
+
+
+def linear_to_srgb(value):
+    """Convert a linear colour channel to the sRGB space Godot's albedo_color expects.
+
+    Blender and glTF both store base colour linearly; StandardMaterial3D.albedo_color is
+    sRGB. Writing the linear number straight into a .tres renders noticeably too dark.
+    """
+    if value <= 0.0031308:
+        return round(value * 12.92, 6)
+    return round(1.055 * (value ** (1 / 2.4)) - 0.055, 6)
+
+
+def as_res_path(path, output_root, res_prefix):
+    """Where a converted file will live in the Godot project it gets copied into.
+
+    This repo is a converter, not a Godot project, so paths are expressed relative to the
+    output root and prefixed with wherever the user intends to drop it.
+    """
+    relative = Path(path).resolve().relative_to(output_root)
+    return f"{res_prefix.rstrip('/')}/" + str(relative).replace(os.sep, "/")
+
+
+def write_manifests(totals, materials_root, output_root, res_prefix):
+    """Write one manifest per pack for the Godot material generator to consume.
+
+    The converter deliberately stops here rather than authoring .tres itself, so that
+    Godot assigns every resource id and uid.
+    """
+    written = []
+    for pack, materials in sorted(totals.materials.items()):
+        if not pack or not materials:
+            continue
+        entries = []
+        for name, entry in sorted(materials.items()):
+            record = {"name": name, "used_by": entry["used_by"],
+                      "source_names": sorted(entry["sources"])}
+            if entry.get("texture"):
+                record["albedo_texture"] = as_res_path(entry["texture"], output_root, res_prefix)
+            else:
+                record["albedo_color"] = [*(linear_to_srgb(c) for c in entry["color"]), entry["alpha"]]
+            if entry.get("transparency"):
+                record["transparency"] = entry["transparency"]
+            if entry.get("reference"):
+                record["reference"] = entry["reference"]
+                record["match"] = entry.get("method")
+            entries.append(record)
+        target = materials_root / pack / "materials.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"pack": pack, "materials": entries}, indent=2) + "\n",
+                          encoding="utf-8")
+        written.append((target, len(entries)))
+    return written
+
+
+def report_materials(totals):
+    """Print how every texture reference resolved, so heuristic matches can be reviewed."""
+    if not any(totals.materials.values()):
+        return
+    print("\nMaterials")
+    for pack, materials in sorted(totals.materials.items()):
+        if not materials:
+            continue
+        counts = collections.Counter(e.get("method") or "unresolved" for e in materials.values())
+        untextured = sum(1 for e in materials.values() if not e.get("reference"))
+        unresolved = sorted(e["reference"] for e in materials.values()
+                            if e.get("reference") and not e.get("method"))
+        print(f"  {pack}: {len(materials)} materials  "
+              f"({counts['exact'] + counts['normalized']} exact, {counts['override']} override, "
+              f"{counts['tokens']} heuristic, {len(unresolved)} unresolved, {untextured} untextured)")
+        for entry in sorted(materials.values(), key=lambda e: -e["used_by"]):
+            if entry.get("method") in ("tokens", "override"):
+                label = "review " if entry["method"] == "tokens" else "manual "
+                print(f"     {label} {entry['reference']} -> {entry['name']} "
+                      f"({entry['used_by']} files)")
+        for entry in sorted(materials.values(), key=lambda e: -e["used_by"]):
+            if entry.get("reference") and not entry.get("method"):
+                print(f"     UNRESOLVED  {entry['reference']}  ({entry['used_by']} files, "
+                      f"colour only; add to texture_overrides.json)")
+
+
+def report(totals, elapsed):
+    print("\n" + "=" * 68)
+    print(f"Converted {totals.converted} FBX -> GLB   (failed {totals.failed}, up to date {totals.skipped})")
+    print(f"Copied    {totals.copied} other files ({human(totals.copied_bytes)})")
+    if totals.converted:
+        saved = totals.src_bytes - totals.dst_bytes
+        ratio = 100.0 * saved / max(totals.src_bytes, 1)
+        print(f"Model size {human(totals.src_bytes)} -> {human(totals.dst_bytes)}"
+              f"   saved {human(saved)} ({ratio:.1f}% smaller)")
+    print(f"Elapsed   {elapsed:.1f}s")
+
+    if totals.grew:
+        print(f"\n{len(totals.grew)} file(s) did not shrink:")
+        for src, before, after in totals.grew[:10]:
+            print(f"  {Path(src).name}: {human(before)} -> {human(after)}")
+    if totals.warnings:
+        print(f"\n{len(totals.warnings)} warning(s):")
+        for warning in totals.warnings[:15]:
+            print(f"  {warning}")
+    if totals.failures:
+        print(f"\n{len(totals.failures)} failure(s):")
+        for src, message in totals.failures[:15]:
+            print(f"  {Path(str(src)).name}: {' '.join(message)}")
+    print("=" * 68)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    root = Path(__file__).resolve().parent
+    parser.add_argument("--src", type=Path, default=root / "synty_packs_fbx", help="source pack directory")
+    parser.add_argument("--dst", type=Path, default=root / "assets", help="output directory")
+    parser.add_argument("--packs", nargs="*", default=None,
+                        help="only convert packs whose folder name contains one of these substrings")
+    parser.add_argument("-j", "--workers", type=int, default=max(1, (os.cpu_count() or 4) // 2),
+                        help="number of concurrent Blender processes")
+    parser.add_argument("--force", action="store_true", help="reconvert files that are already up to date")
+    parser.add_argument("--verify", action="store_true",
+                        help="reimport each GLB and check vertex, bone and bounding-box parity")
+    parser.add_argument("--vertex-colors", choices=("drop", "keep"), default="drop",
+                        help="drop vertex colors for barebones meshes, or keep them")
+    parser.add_argument("--animations", choices=("keep", "drop"), default="keep",
+                        help="drop baked-in takes; useful for model packs whose clips live elsewhere")
+    parser.add_argument("--materials", choices=("external", "none"), default="external",
+                        help="'external' references shared textures by URI and writes Godot manifests; "
+                             "'none' strips materials for barebones meshes")
+    parser.add_argument("--materials-dir", type=Path, default=root / "materials",
+                        help="where per-pack material manifests are written")
+    parser.add_argument("--res-prefix", default=None,
+                        help="res:// location the converted assets will live at in your Godot "
+                             "project (default: res://<output folder name>)")
+    parser.add_argument("--scan-materials", action="store_true",
+                        help="report how texture references resolve, without converting anything")
+    parser.add_argument("--dry-run", action="store_true", help="list what would happen and exit")
+    parser.add_argument("--quiet", action="store_true", help="only print the final summary")
+    parser.add_argument("--blender", default=None, help="path to the Blender executable")
+    args = parser.parse_args()
+
+    source_root = args.src.resolve()
+    output_root = args.dst.resolve()
+    if not source_root.is_dir():
+        sys.exit(f"Source directory not found: {source_root}")
+
+    jobs, copies = discover(source_root, output_root, args.packs)
+    if not jobs and not copies:
+        sys.exit("Nothing matched. Check --src and --packs.")
+
+    totals = Totals()
+    if not args.force and not args.scan_materials:
+        current = [job for job in jobs if is_current(job)]
+        totals.skipped = len(current)
+        jobs = [job for job in jobs if not is_current(job)]
+
+    packs = sorted({pack_of(job.src, source_root) for job in jobs + copies})
+    print(f"Source  {source_root}")
+    print(f"Output  {output_root}")
+    print(f"Packs   {', '.join(packs)}")
+    print(f"Models  {len(jobs)} to convert, {totals.skipped} up to date")
+    print(f"Assets  {len(copies)} files to mirror\n")
+
+    if args.dry_run:
+        for job in jobs[:20]:
+            print(f"  {job.src.relative_to(source_root)} -> {job.dst.relative_to(output_root)}")
+        if len(jobs) > 20:
+            print(f"  ... and {len(jobs) - 20} more")
+        return
+
+    blender = find_blender(args.blender)
+    started = time.monotonic()
+    contexts = pack_contexts(packs, source_root, output_root)
+    if not args.scan_materials:
+        copy_assets(copies, args.force, totals)
+    if jobs:
+        options = {"verify": args.verify, "vertex_colors": args.vertex_colors,
+                   "animations": args.animations, "materials": args.materials,
+                   "scan_only": args.scan_materials}
+        convert_all(blender, jobs, options, contexts,
+                    max(1, min(args.workers, len(jobs))), totals, args.quiet)
+
+    if args.scan_materials:
+        report_materials(totals)
+        print(f"\nScanned {totals.converted} files in {time.monotonic() - started:.1f}s. "
+              f"Nothing was written.")
+        sys.exit(1 if totals.failed else 0)
+
+    report(totals, time.monotonic() - started)
+    report_materials(totals)
+    if args.materials == "external":
+        materials_root = args.materials_dir.resolve()
+        prefix = args.res_prefix or f"res://{output_root.name}"
+        written = write_manifests(totals, materials_root, output_root, prefix)
+        for target, count in written:
+            print(f"  wrote {target} ({count} materials)")
+        if not written and totals.skipped:
+            # Material records come from reading the FBX, so nothing to rebuild from.
+            print(f"\n  Note: every model was already up to date, so no manifest was rewritten."
+                  f"\n  Rerun with --force to regenerate them (needed after changing --res-prefix).")
+        if written:
+            assets_at = prefix.removeprefix("res://").rstrip("/")
+            tools = Path(__file__).parent / "tools"
+            print("\nTo use these, copy these three folders into your Godot project:")
+            print(f"  {output_root}  ->  <project>/{assets_at}/")
+            print(f"  {materials_root}  ->  <project>/materials/")
+            print(f"  {tools}  ->  <project>/tools/")
+            # Textures must be in Godot's import cache before the generator can load them.
+            print("\nthen, from that project:")
+            print("  godot --headless --import")
+            print("  godot --headless --script res://tools/generate_materials.gd")
+            print(f"\nThe materials reference textures at {prefix}/..., so the assets have to "
+                  f"land there.\nFor a different location, reconvert with "
+                  f"--res-prefix res://your/path --force.")
+    sys.exit(1 if totals.failed else 0)
+
+
+if __name__ == "__main__":
+    main()

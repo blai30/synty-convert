@@ -1,0 +1,11 @@
+__pycache__/
+.godot/
+_test*/
+
+# Generated output.
+assets/
+materials/
+
+# Source packs are large and licensed. Drop them in, keep the folder itself.
+synty_packs_fbx/*
+!synty_packs_fbx/.gitkeep
