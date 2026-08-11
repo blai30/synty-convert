@@ -16,6 +16,7 @@ synty_convert.py       the converter
 audit.py               checks the output
 texture_matching.py    resolves texture references     (used by the converter)
 blender_convert.py     runs inside Blender             (used by the converter)
+split_character_head.py splits character heads         (used by blender_convert.py)
 texture_overrides.json manual texture mappings
 
 tools/                 Godot side scripts, copied into your project as <project>/tools/
@@ -180,6 +181,59 @@ To apply one, per model:
 
 Animation packs import as a `Skeleton3D` plus an `AnimationPlayer` holding one clip. To drive a character with them, both must share a rig; Synty's animation packs target their own skeletons, so check bone names match before retargeting.
 
+## Splitting character heads
+
+Synty characters are a single skinned mesh with the head welded into the body, so there is nothing to toggle if you want to hide it. `--split-heads` puts the head on its own mesh node instead:
+
+```bash
+# every rigged character in every pack
+python synty_convert.py --split-heads --force
+
+# only the ones you name, matched as substrings of the filename
+python synty_convert.py --split-heads SK_Chr_MilitaryMale_01 SK_Character_Cop_01 --force
+```
+
+`--force` is needed on an existing conversion, since a model whose `.glb` is already up to date is skipped and would never be rebuilt.
+
+The GLB still lands at its normal path with the same name. Inside it, one mesh node becomes two under the same `Skeleton3D`:
+
+```
+Skeleton3D
+  Character_MilitaryMale_01_Body   MeshInstance3D
+  Character_MilitaryMale_01_Head   MeshInstance3D
+```
+
+Which files get split is decided by content, not by name: a single armature carrying a `Head` bone. Props flow through untouched, so it is safe to leave the flag on for a whole run. Names only narrow the set.
+
+The head is chosen by vertex weight, counting the head bone plus every bone parented under it. That closure is what carries the eyes and eyebrows across, since they are weighted to their own bones rather than to the head.
+
+Faces that span the boundary stay with the body, so the seam vertices exist in both halves at matching positions with matching weights and the neck cannot crack open under a pose. That leaves the body itself open at the neck, which is invisible while the head is shown and a hole through the torso once it is hidden, so the body is capped with a triangle fan whose center vertex carries the neck's mean weights and deforms with it. The head is deliberately left open, because its opening sits inside the body's cap and capping both would leave two coincident faces to z-fight.
+
+### Using it for first person
+
+Both halves are ordinary nodes, so hiding the head is `$Head.visible = false`. Two things are worth doing instead:
+
+```gdscript
+# your own camera skips the head; every other camera still sees it
+head.layers = 2
+first_person_camera.cull_mask &= ~2
+
+# and your shadow keeps its head
+head.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+```
+
+The render layer is per camera rather than per instance, so other players, your third person toggle, spectator and killcam views all keep the head with no state to synchronize. `SHADOWS_ONLY` matters because you see your own shadow constantly, and a headless one is a bug you would otherwise have no way to fix.
+
+### Necks that cannot be capped
+
+A handful of Synty meshes ship non-manifold around the neck, and a branching boundary is not a ring a fan can close. Those are counted on the summary line and left open rather than half filled:
+
+```
+Split     154 head(s) off 81 character model(s), 2 left open at the neck
+```
+
+Across all eleven packs here that is 2 of 154. Both are meshes whose vendor geometry is already broken before conversion. If a model you want as the player character shows up in that count, check it in Godot with the head hidden before building on it.
+
 ## Fixing unresolved textures
 
 Synty's FBX reference authoring files that never shipped, so some references cannot be matched. When that happens the material keeps its colour and is reported.
@@ -232,6 +286,7 @@ godot --headless --script res://tools/verify_import.gd -- --assets res://assets
 | `--materials`      | `external`         | `none` strips materials for barebones meshes                  |
 | `--materials-dir`  | `materials`        | Where the per-pack manifests are written                      |
 | `--res-prefix`     | `res://<dst name>` | Where the assets will live in the target Godot project        |
+| `--split-heads`    | off                | Put each character's head on its own mesh node                |
 | `--scan-materials` | off                | Report texture resolution only, write nothing                 |
 | `--force`          | off                | Reconvert files that are already up to date                   |
 | `--verify`         | off                | Reimport each GLB and check bounds, bone and action parity    |

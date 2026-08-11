@@ -47,6 +47,7 @@ class Job:
     src: Path
     dst: Path
     pack: str = ""
+    split: bool = False
 
 
 @dataclass
@@ -62,6 +63,7 @@ class Totals:
     warnings: list = field(default_factory=list)
     failures: list = field(default_factory=list)
     materials: dict = field(default_factory=dict)
+    split: dict = field(default_factory=dict)
 
 
 def find_blender(explicit):
@@ -102,6 +104,17 @@ def discover(source_root, output_root, patterns):
     return jobs, copies
 
 
+def mark_splits(jobs, patterns):
+    """Flag the jobs whose characters should have their heads split onto their own node.
+
+    An empty pattern list means every job is offered up; whether a file turns out to hold
+    a character is decided in Blender by looking for a rig with a head bone, since a name
+    cannot tell you that. Patterns narrow the offer to matching filenames.
+    """
+    for job in jobs:
+        job.split = not patterns or any(fnmatch.fnmatch(job.src.name, f"*{p}*") for p in patterns)
+
+
 def pack_contexts(packs, source_root, output_root):
     """Per-pack texture index and manual overrides, shared with every worker."""
     overrides = {}
@@ -139,7 +152,8 @@ def run_worker(blender, jobs, options, contexts, on_result):
     handle, job_path = tempfile.mkstemp(suffix=".json", prefix="synty_")
     with os.fdopen(handle, "w", encoding="utf-8") as stream:
         json.dump({"options": options, "packs": contexts,
-                   "jobs": [{"src": str(j.src), "dst": str(j.dst), "pack": j.pack} for j in jobs]}, stream)
+                   "jobs": [{"src": str(j.src), "dst": str(j.dst), "pack": j.pack,
+                             "split": j.split} for j in jobs]}, stream)
 
     command = [blender, "--background", "--factory-startup", "--python-exit-code", "1",
                "--python", str(WORKER_SCRIPT), "--", job_path]
@@ -183,6 +197,8 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             entry = pack.setdefault(material["name"], dict(material, used_by=0, sources=set()))
             entry["used_by"] += 1
             entry["sources"].add(material["source"])
+        if result.get("split"):
+            totals.split[result["src"]] = result["split"]
         if result["dst_bytes"] >= result["src_bytes"]:
             totals.grew.append((result["src"], result["src_bytes"], result["dst_bytes"]))
         for warning in result.get("warnings", []):
@@ -283,6 +299,13 @@ def report(totals, elapsed):
     print("\n" + "=" * 68)
     print(f"Converted {totals.converted} FBX -> GLB   (failed {totals.failed}, up to date {totals.skipped})")
     print(f"Copied    {totals.copied} other files ({human(totals.copied_bytes)})")
+    if totals.split:
+        records = [record for entries in totals.split.values() for record in entries]
+        # An uncapped neck is only visible once a head is hidden in game, far from here,
+        # so it gets its own line rather than a warning that the list below may truncate.
+        open_necks = sum(1 for record in records if record.get("open_rings"))
+        summary = f"Split     {len(records)} head(s) off {len(totals.split)} character model(s)"
+        print(summary + (f", {open_necks} left open at the neck" if open_necks else ""))
     if totals.converted:
         saved = totals.src_bytes - totals.dst_bytes
         ratio = 100.0 * saved / max(totals.src_bytes, 1)
@@ -329,6 +352,10 @@ def main():
     parser.add_argument("--res-prefix", default=None,
                         help="res:// location the converted assets will live at in your Godot "
                              "project (default: res://<output folder name>)")
+    parser.add_argument("--split-heads", nargs="*", default=None, metavar="NAME",
+                        help="split every rigged character's head onto its own mesh node, so it "
+                             "can be hidden or moved to another render layer in Godot; "
+                             "name substrings limit this to matching files")
     parser.add_argument("--scan-materials", action="store_true",
                         help="report how texture references resolve, without converting anything")
     parser.add_argument("--dry-run", action="store_true", help="list what would happen and exit")
@@ -346,6 +373,8 @@ def main():
         sys.exit("Nothing matched. Check --src and --packs.")
 
     totals = Totals()
+    if args.split_heads is not None:
+        mark_splits(jobs, args.split_heads)
     if not args.force and not args.scan_materials:
         current = [job for job in jobs if is_current(job)]
         totals.skipped = len(current)
@@ -385,6 +414,14 @@ def main():
 
     report(totals, time.monotonic() - started)
     report_materials(totals)
+    if args.split_heads:
+        # Only worth saying when names were given: without them most files are props and
+        # holding no character is the expected answer, not a problem.
+        missed = sorted({str(job.src) for job in jobs if job.split} - set(totals.split))
+        if missed:
+            print(f"\n{len(missed)} named file(s) held no rigged character to split:")
+            for path in missed[:10]:
+                print(f"  {Path(path).name}")
     if args.materials == "external":
         materials_root = args.materials_dir.resolve()
         prefix = args.res_prefix or f"res://{output_root.name}"

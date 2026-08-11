@@ -8,7 +8,9 @@ The job file holds ``{"options": {...}, "jobs": [{"src": ..., "dst": ...}, ...]}
 One ``@@RESULT {json}`` line is printed per job for the parent process to collect.
 
 Each job runs the same pipeline: import the FBX, strip every material, normalize the
-armature so Godot receives an identity-transform Skeleton3D, then export a GLB.
+armature so Godot receives an identity-transform Skeleton3D, then export a GLB. Jobs
+flagged ``split`` also have any character head separated onto its own node first; see
+``split_character_head.py``.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import numpy
 from mathutils import Matrix
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import split_character_head
 import texture_matching
 
 RESULT_PREFIX = "@@RESULT "
@@ -527,6 +530,9 @@ def convert(job, options, packs):
     if options.get("vertex_colors") != "keep":
         drop_vertex_colors()
     drop_non_geometry()
+    # Ahead of everything downstream, so the two halves are normalized, materialized and
+    # exported as ordinary meshes rather than needing a second pass over the finished GLB.
+    split = split_character_head.split_scene(warnings) if job.get("split") else []
     materials = rebuild_materials(packs.get(job.get("pack"), {}), warnings) if external else []
     if not external:
         strip_materials()
@@ -561,6 +567,7 @@ def convert(job, options, packs):
         "normalized_scale": applied_scale,
         "summary": source_summary,
         "materials": materials,
+        "split": split,
         "warnings": warnings,
     }
 
