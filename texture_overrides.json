@@ -5,6 +5,13 @@
     "Air_Vehicle_Damaged_01": "PolygonBattleRoyale_Plane_01_Damaged.png",
     "track2": "PolygonBattleRoyale_Tank_Tracks.png"
   },
+  "POLYGON_Military_SourceFiles_v4": {
+    "Wep_Skin_01": "PolygonMilitary_Weapons_01.png",
+    "Weapon_Skins_Master_07": "PolygonMilitary_Weapons_07.png",
+    "PolygonBattleRoyale_Vehicles_02": "PolygonMilitary_Land_Vehicles_02.png",
+    "Signs": "Signs 1.png",
+    "Sky": "SkyBox.png"
+  },
   "PolygonSciFiSpace": {
     "PolygonSciFiCity_Texture_01_A": "PolygonSciFiSpace_Texture_01_A.png",
     "PolygonSciFiCity_Texture_01_A_mike": "PolygonSciFiSpace_Texture_01_A.png",
@@ -40,6 +47,8 @@
   },
   "PolygonFantasyKingdom": {
     "Roof_Tile_Final_occlusion": "Roof_Tile_01.png",
-    "Horse_Texture_01": "Horse_01.png"
+    "Horse_Texture_01": "Horse_01.png",
+    "Paintings_02": "Paintings_01.png",
+    "Wall_01": "Wall_Brick_01.png"
   }
 }

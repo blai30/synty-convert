@@ -27,11 +27,12 @@ materials/             output: material manifests      -> <project>/materials/
 
 ## What it fixes
 
-Synty FBX do not import cleanly into Godot on their own. The converter deals with four problems:
+Synty FBX do not import cleanly into Godot on their own. The converter deals with five problems:
 
 - **Scale and axes.** The packs are authored in Maya in centimeters, Y-up. A naive conversion gives you a `Node3D` or `Skeleton3D` scaled to 1/100 and rotated 90 degrees, which throws off every `BoneAttachment3D`, collision shape and root motion value. The converter bakes that away, so a character arrives 1.79 m tall, upright, standing at Y = 0, on identity transforms.
 - **Broken texture references.** Every material points at internal authoring files that were never shipped, usually named for a different pack. The converter works out which shipped texture each one meant.
 - **Duplicated textures.** Synty FBX embed their atlas, so a naive conversion copies a 2048x2048 PNG into every model. The converter references one shared file instead.
+- **Authoring leftovers.** Some models carry a single-key `Take 001` that only restates the import transform, or an Unreal `UCX_` collision hull. Both are dropped. Left in, the take blocks normalization and then reapplies in Godot the very transform normalization exists to remove, and the hull arrives as a visible untextured box over the prop it was meant to bound.
 - **Size.** 1039 models across two packs go from 528.7 MB to 152.9 MB, a 71.1% reduction.
 
 ## Requirements
@@ -251,7 +252,7 @@ Add the mapping to `texture_overrides.json`, keyed by pack folder name, then by 
 
 Overrides beat the heuristic, so use them to correct a wrong match too. Then rerun the conversion with `--force` and regenerate the materials.
 
-The file ships with 24 mappings covering 9 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. If you own a pack that is not listed, run `--scan-materials` and add what you find.
+The file ships with 29 mappings covering 10 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. If you own a pack that is not listed, run `--scan-materials` and add what you find.
 
 What is deliberately **not** mapped is anything ambiguous. `Wall_01.psd` in FantasyKingdom could be any of five shipped wall textures, and `RopeBridge.png` has no counterpart at all. Guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one, so those stay colour-only and stay in the report.
 

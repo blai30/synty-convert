@@ -38,6 +38,7 @@ RESULT_PREFIX = "@@RESULT "
 # parks on the armature object as scale 0.01 plus a 90 degree X rotation.
 UNIFORM_SCALE_TOLERANCE = 1e-5
 IDENTITY_TOLERANCE = 1e-6
+STATIC_CURVE_TOLERANCE = 1e-6
 
 FBX_IMPORT_OPTIONS = {
     "use_anim": True,
@@ -113,16 +114,25 @@ def activate(obj):
     bpy.context.view_layer.objects.active = obj
 
 
-def iter_fcurves(action):
-    """Yield an action's fcurves across both the legacy and slotted (Blender 4.4+) layouts."""
+def fcurve_groups(action):
+    """Yield each fcurve collection an action holds, legacy or slotted (Blender 4.4+).
+
+    Removing a curve needs the collection that owns it, which iterating them loses.
+    """
     legacy = getattr(action, "fcurves", None)
     if legacy is not None:
-        yield from legacy
+        yield legacy
         return
     for layer in action.layers:
         for strip in layer.strips:
             for channelbag in strip.channelbags:
-                yield from channelbag.fcurves
+                yield channelbag.fcurves
+
+
+def iter_fcurves(action):
+    """Yield an action's fcurves across both the legacy and slotted (Blender 4.4+) layouts."""
+    for group in fcurve_groups(action):
+        yield from group
 
 
 def actions_of(obj):
@@ -168,6 +178,34 @@ def has_object_level_animation(obj):
             if not fcurve.data_path.startswith("pose.bones["):
                 return True
     return False
+
+
+def is_static(fcurve):
+    """True when every key holds the same value, so the curve expresses no motion."""
+    values = [point.co[1] for point in fcurve.keyframe_points]
+    return len(values) < 2 or max(values) - min(values) < STATIC_CURVE_TOLERANCE
+
+
+def drop_static_takes():
+    """Remove object-level transform curves that never change value.
+
+    Synty exports a single-key 'Take 001' onto props that are not animated at all, which
+    just restates the importer's centimeter and Y-up transform. It carries no motion, so
+    all it does is block normalization and then, in the exported clip, reapply the very
+    transform normalization exists to remove. Pose-bone channels are left alone; they are
+    what real character takes are made of.
+    """
+    actions = {action for obj in bpy.data.objects for action in actions_of(obj)}
+    for action in actions:
+        for group in fcurve_groups(action):
+            for fcurve in [curve for curve in group
+                           if not curve.data_path.startswith("pose.bones[") and is_static(curve)]:
+                group.remove(fcurve)
+    # An action left with no channels exports as nothing, so drop it outright rather than
+    # let the scene claim a take the GLB does not carry.
+    for action in actions:
+        if not list(iter_fcurves(action)):
+            bpy.data.actions.remove(action)
 
 
 def normalize_transforms(warnings):
@@ -443,9 +481,14 @@ def externalize_images(path, warnings):
 
 
 def drop_non_geometry():
-    """Delete cameras and lights; Godot scenes supply their own."""
+    """Delete cameras, lights and Unreal collision hulls; Godot supplies its own.
+
+    A ``UCX_`` prefix is Unreal's convention for a collision mesh. Godot reads no meaning
+    into the name, so a hull left in the export arrives as a visible untextured box
+    sitting over the prop it was meant to bound.
+    """
     for obj in list(bpy.data.objects):
-        if obj.type in {"CAMERA", "LIGHT", "SPEAKER"}:
+        if obj.type in {"CAMERA", "LIGHT", "SPEAKER"} or obj.name.upper().startswith("UCX_"):
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
@@ -537,8 +580,10 @@ def convert(job, options, packs):
     if not external:
         strip_materials()
 
-    # Normalizing must not move anything, so the world bounds are an always-on invariant.
+    # Neither dropping takes nor normalizing may move anything, so the world bounds are an
+    # always-on invariant across both.
     bounds_before = scene_bounds()
+    drop_static_takes()
     applied_scale = normalize_transforms(warnings)
     drift = bounds_drift(bounds_before, scene_bounds())
     if drift > 1e-3:
