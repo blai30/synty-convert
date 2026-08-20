@@ -36,6 +36,12 @@ SYNONYMS = {"destroyed": "damaged", "broken": "damaged", "wrecked": "damaged",
 MIN_SCORE = 8.0
 MIN_MARGIN = 3.0
 
+# Separates a pack name from a path suffix in an override value, for the cases where the
+# texture a pack asks for is one another pack ships. Synty's biome packs are built on top
+# of the base Nature pack and reference its atlas directly, so the file genuinely lives
+# next door rather than being a name that needs decoding.
+FOREIGN_SEPARATOR = "::"
+
 
 @dataclass
 class Match:
@@ -119,7 +125,7 @@ def tail_variants(tokens, max_trim=3):
             yield tokens[:len(tokens) - trimmed]
 
 
-def best_match(reference_tokens, candidates, common):
+def best_match(reference_tokens, candidates, common, min_run=1):
     """Highest scoring candidate, or None if it is weak, contested or uninformative."""
     ranked = sorted(((score_candidate(reference_tokens, tokens), name, tokens)
                      for name, tokens in candidates.items()),
@@ -128,20 +134,25 @@ def best_match(reference_tokens, candidates, common):
     runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
     if best_score < MIN_SCORE or best_score - runner_up < MIN_MARGIN:
         return None
-    # A run made only of tokens shared by most of the pack (texture, 01, a) says nothing:
-    # it is how Dungeons_Texture would otherwise capture Track_Texture.
     core_reference = [token for token in reference_tokens if token not in VARIANT_TOKENS]
     core_candidate = [token for token in best_tokens if token not in VARIANT_TOKENS]
-    run = core_reference[len(core_reference) - trailing_run(core_reference, core_candidate):]
+    length = trailing_run(core_reference, core_candidate)
+    if length < min_run:
+        return None
+    # A run made only of tokens shared by most of the pack (texture, 01, a) says nothing:
+    # it is how Dungeons_Texture would otherwise capture Track_Texture.
+    run = core_reference[len(core_reference) - length:]
     if run and all(token in common for token in run):
         return None
     return best_name, round(best_score, 2)
 
 
-def resolve(reference, textures, overrides=None):
+def resolve(reference, textures, overrides=None, foreign=None):
     """Resolve one FBX texture reference against a pack's shipped textures.
 
-    Returns a ``Match``, or None when nothing is confident enough to be worth using.
+    ``foreign`` maps a pack name to that pack's texture index, for override values written
+    as ``OtherPack::path/suffix.png``. Returns a ``Match``, or None when nothing is
+    confident enough to be worth using.
     """
     if not reference or not textures:
         return None
@@ -151,7 +162,11 @@ def resolve(reference, textures, overrides=None):
     if overrides:
         target = overrides.get(stem) or overrides.get(stem.lower())
         if target:
-            for path in textures:
+            pool = textures
+            if FOREIGN_SEPARATOR in target:
+                pack, target = target.split(FOREIGN_SEPARATOR, 1)
+                pool = (foreign or {}).get(pack, [])
+            for path in pool:
                 if path.replace("\\", "/").endswith(target.replace("\\", "/")):
                     return Match(path, 100.0, "override")
             return None
@@ -174,7 +189,11 @@ def resolve(reference, textures, overrides=None):
         name = normalized.get("_".join(tokens))
         if name:
             return Match(lookup[name], 100.0 - depth, method)
-        found = best_match(tokens, candidates, common)
+        # Trimming has already thrown away tokens that might have been the distinguishing
+        # ones, so a single shared trailing token is no longer evidence of anything. It is
+        # how PolygonNatureBiomes_Texture_01_Tom, shorn of its artist suffix, otherwise
+        # lands on Birch_Trunk_Texture: the only candidate ending in "texture".
+        found = best_match(tokens, candidates, common, min_run=1 if depth == 0 else 2)
         if found:
             return Match(lookup[found[0]], found[1], "tokens" if depth == 0 else "trimmed")
     return None

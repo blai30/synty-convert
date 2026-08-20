@@ -361,13 +361,14 @@ def resolve_materials(context, warnings):
     """Map every imported material to a canonical record. Makes no changes to the scene."""
     textures = context.get("textures", []) if context else []
     overrides = context.get("overrides", {}) if context else {}
+    foreign = context.get("foreign", {}) if context else {}
     source_root = context.get("source_root", "") if context else ""
     output_root = context.get("output_root", "") if context else ""
 
     resolved = {}
     for material in bpy.data.materials:
         info = describe_material(material)
-        match = texture_matching.resolve(info["reference"], textures, overrides) if info["reference"] else None
+        match = texture_matching.resolve(info["reference"], textures, overrides, foreign) if info["reference"] else None
         source_texture = match.path if match else None
         texture_path = None
         if match:
@@ -378,7 +379,13 @@ def resolve_materials(context, warnings):
                 texture_path = candidate
             elif output_root and os.path.isdir(output_root):
                 # Absent output pack means this is a scan, not a conversion.
-                warnings.append(f"texture not mirrored yet: {relative}")
+                if relative.startswith(os.pardir):
+                    # An override reached into a pack that has not been converted, so the
+                    # mirrored texture it points at does not exist yet.
+                    warnings.append(f"cross-pack texture needs its pack converted too: "
+                                    f"{os.path.normpath(relative)}")
+                else:
+                    warnings.append(f"texture not mirrored yet: {relative}")
         elif info["reference"]:
             warnings.append(f"unresolved texture reference '{info['reference']}'")
         stem = os.path.splitext(os.path.basename(source_texture))[0] if source_texture else ""

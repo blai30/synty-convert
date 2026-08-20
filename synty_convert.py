@@ -120,14 +120,29 @@ def pack_contexts(packs, source_root, output_root):
     overrides = {}
     if OVERRIDES_FILE.exists():
         overrides = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
+    indexes = {}
+
+    def index(pack):
+        if pack not in indexes:
+            indexes[pack] = texture_matching.index_textures(source_root / pack)
+        return indexes[pack]
+
     contexts = {}
     for pack in packs:
-        root = source_root / pack
+        entries = {k: v for k, v in overrides.get(pack, {}).items() if not k.startswith("_")}
+        # An override may point into another pack, which then has to be indexed as well,
+        # whether or not that pack is itself part of this run.
+        foreign = {}
+        for target in entries.values():
+            if texture_matching.FOREIGN_SEPARATOR in target:
+                other = target.split(texture_matching.FOREIGN_SEPARATOR, 1)[0]
+                foreign[other] = index(other)
         contexts[pack] = {
-            "source_root": str(root),
+            "source_root": str(source_root / pack),
             "output_root": str(output_root / pack),
-            "textures": texture_matching.index_textures(root),
-            "overrides": {k: v for k, v in overrides.get(pack, {}).items() if not k.startswith("_")},
+            "textures": index(pack),
+            "overrides": entries,
+            "foreign": foreign,
         }
     return contexts
 
@@ -283,10 +298,13 @@ def report_materials(totals):
                             if e.get("reference") and not e.get("method"))
         print(f"  {pack}: {len(materials)} materials  "
               f"({counts['exact'] + counts['normalized']} exact, {counts['override']} override, "
-              f"{counts['tokens']} heuristic, {len(unresolved)} unresolved, {untextured} untextured)")
+              f"{counts['tokens'] + counts['trimmed']} heuristic, {len(unresolved)} unresolved, "
+              f"{untextured} untextured)")
         for entry in sorted(materials.values(), key=lambda e: -e["used_by"]):
-            if entry.get("method") in ("tokens", "override"):
-                label = "review " if entry["method"] == "tokens" else "manual "
+            # A trimmed match dropped tokens to find its winner, so it is a guess like any
+            # other heuristic and belongs in front of the reader, not folded into the exact count.
+            if entry.get("method") in ("tokens", "trimmed", "override"):
+                label = "manual " if entry["method"] == "override" else "review "
                 print(f"     {label} {entry['reference']} -> {entry['name']} "
                       f"({entry['used_by']} files)")
         for entry in sorted(materials.values(), key=lambda e: -e["used_by"]):

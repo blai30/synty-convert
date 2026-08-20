@@ -1,5 +1,5 @@
 {
-  "_comment": "Manual texture mappings for references the matcher cannot resolve lexically. Keyed by pack folder name, then by the texture stem the FBX asks for. Values are path suffixes matched against the pack's shipped textures. Keys starting with _ are ignored. Run --scan-materials to see what is still unresolved in your own packs.",
+  "_comment": "Manual texture mappings for references the matcher cannot resolve lexically. Keyed by pack folder name, then by the texture stem the FBX asks for. Values are path suffixes matched against the pack's shipped textures. Write a value as 'OtherPack::path/suffix.png' when the texture a pack asks for is one another pack ships, which is how Synty's biome packs reference the base Nature atlas; that other pack then has to be converted too. Keys starting with _ are ignored. Run --scan-materials to see what is still unresolved in your own packs.",
   "POLYGON_BattleRoyale_Source_Files_v4": {
     "Air_Vehicle_Master_01": "PolygonBattleRoyale_Plane_01.png",
     "Air_Vehicle_Damaged_01": "PolygonBattleRoyale_Plane_01_Damaged.png",
@@ -10,7 +10,24 @@
     "Weapon_Skins_Master_07": "PolygonMilitary_Weapons_07.png",
     "PolygonBattleRoyale_Vehicles_02": "PolygonMilitary_Land_Vehicles_02.png",
     "Signs": "Signs 1.png",
-    "Sky": "SkyBox.png"
+    "Sky": "SkyBox.png",
+    "PolygonConstruction_Texture_01_Atemp": "POLYGON_Construction_SourceFiles_v3::Textures/PolygonConstruction_Texture_01_A.png"
+  },
+  "POLYGON_Dungeons_Realms_SourceFiles_v2": {
+    "PolygonConstruction_Texture_01_Atemp": "POLYGON_Construction_SourceFiles_v3::Textures/PolygonConstruction_Texture_01_A.png"
+  },
+  "POLYGON_Dungeon_Pack_SourceFiles_v2": {
+    "Dungeons_Texture": "Dungeons_Texture_01.png"
+  },
+  "POLYGON_Adventure_Pack_SourceFiles_v5": {
+    "Texture_01": "PolyAdventureTexture_01.png"
+  },
+  "POLYGON_NatureBiomes_TropicalJungle_SourceFiles_v2": {
+    "RopeBridge": "PolygonNatureBiomes_Tropical_Texture_01.png",
+    "PolygonNatureBiomes_Texture_01": "PolygonNatureBiomes_Tropical_Texture_01.png",
+    "PolygonNatureBiomes_Texture_01_Justin": "PolygonNatureBiomes_Tropical_Texture_01.png",
+    "PolygonNatureBiomes_Texture_01_Tom": "PolygonNatureBiomes_Tropical_Texture_01.png",
+    "Flowers_Flat_01": "FlowersFlat_01.tga"
   },
   "PolygonSciFiSpace": {
     "PolygonSciFiCity_Texture_01_A": "PolygonSciFiSpace_Texture_01_A.png",
@@ -30,13 +47,20 @@
     "FernLeaf": "Fern_Texture.png"
   },
   "POLYGON_NatureBiomes_MeadowForest_SourceFiles_v2": {
-    "Flowers_Flat_01": "FlowersFlat_01.tga"
+    "Flowers_Flat_01": "FlowersFlat_01.tga",
+    "RopeBridge": "PolygonNatureBiomes_Meadow_Texture_01.png",
+    "PolygonNatureBiomes_Texture_01": "PolygonNatureBiomes_Meadow_Texture_01.png",
+    "PolygonNatureBiomes_Texture_01_Justin": "PolygonNatureBiomes_Meadow_Texture_01.png",
+    "PolygonNatureBiomes_Texture_01_Tom": "PolygonNatureBiomes_Meadow_Texture_01.png",
+    "PolygonNature": "POLYGON_Nature_Source_Files_v2::Textures/PolygonNature_01.png"
   },
   "POLYGON_NatureBiomes_AridDesert_SourceFiles_v2": {
     "PolygonNatureBiomes_Texture_01_Tom": "PolygonNatureBiomesS2_AridDesert_Texture_01.png",
     "PolygonNatureBiomes_Texture_01_Justin": "PolygonNatureBiomesS2_AridDesert_Texture_01.png",
+    "PolygonNatureBiomesS2_Texture_01": "PolygonNatureBiomesS2_AridDesert_Texture_01.png",
     "vulture_Test": "Vulture_Wing_Tex_01.png",
-    "Succulent_Leaves_Diffuse": "Succulent_Leaves_Diffuse_PNGTEMP.png"
+    "Succulent_Leaves_Diffuse": "Succulent_Leaves_Diffuse_PNGTEMP.png",
+    "PolygonMilitary_Texture_01_A": "POLYGON_Military_SourceFiles_v4::Textures/PolygonMilitary_Texture_01_A.png"
   },
   "POLYGON_Construction_SourceFiles_v3": {
     "PolygonConstruction_Texture_01_Atemp": "PolygonConstruction_Texture_01_A.png"

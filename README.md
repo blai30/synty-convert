@@ -252,9 +252,21 @@ Add the mapping to `texture_overrides.json`, keyed by pack folder name, then by 
 
 Overrides beat the heuristic, so use them to correct a wrong match too. Then rerun the conversion with `--force` and regenerate the materials.
 
-The file ships with 29 mappings covering 10 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. If you own a pack that is not listed, run `--scan-materials` and add what you find.
+Sometimes the texture a pack asks for is one **another pack** ships. Synty's biome packs are built on the base Nature pack and reference its atlas directly, and the generic `SM_Generic_*` filler kit carries the Construction pack's atlas wherever it turns up. Name the other pack ahead of the suffix for those:
 
-What is deliberately **not** mapped is anything ambiguous. `Wall_01.psd` in FantasyKingdom could be any of five shipped wall textures, and `RopeBridge.png` has no counterpart at all. Guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one, so those stay colour-only and stay in the report.
+```json
+{
+  "POLYGON_NatureBiomes_MeadowForest_SourceFiles_v2": {
+    "PolygonNature": "POLYGON_Nature_Source_Files_v2::Textures/PolygonNature_01.png"
+  }
+}
+```
+
+That other pack has to be converted too, since the material points at its mirrored copy under `assets/`. Convert only one of the pair and the run says so and leaves the material colour only.
+
+The file ships with 47 mappings covering 14 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. A working file's name is not evidence of what it holds: `RopeBridge.png` is the atlas for 45 Meadow Forest props, none of which is a rope bridge, because the artist named the file in the Tropical Jungle scene that does have one. If you own a pack that is not listed, run `--scan-materials` and add what you find.
+
+What is deliberately **not** mapped is anything ambiguous. `Wall_01.psd` in FantasyKingdom could be any of five shipped wall textures, and references to packs you do not own, like `PolygonAncientWorlds_Texture_01.png`, have no counterpart to find. Guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one, so those stay colour-only and stay in the report.
 
 ## Verifying
 
