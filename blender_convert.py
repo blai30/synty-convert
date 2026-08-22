@@ -416,25 +416,39 @@ def distinct_materials(resolved):
     return list(records.values())
 
 
+def material_indices(mesh):
+    """The material slot each polygon is assigned to."""
+    buffer = [0] * len(mesh.polygons)
+    mesh.polygons.foreach_get("material_index", buffer)
+    return buffer
+
+
 def rebuild_materials(context, warnings):
     """Replace every imported material with a canonically named, deduplicated one.
 
     Returns one record per distinct material for the CLI to turn into a Godot manifest.
     """
     resolved = resolve_materials(context, warnings)
-    # Capture slot assignments, then rebuild from scratch so names cannot collide.
-    slots = {mesh.name: [resolved.get(m.name, {}).get("name") if m else None for m in mesh.materials]
-             for mesh in bpy.data.meshes}
+    # Capture slot assignments, then rebuild from scratch so names cannot collide. Emptying
+    # a mesh's slots also resets every polygon's material_index to zero, so the per-face
+    # assignment has to be carried across by hand; without it a multi-material mesh
+    # collapses onto whatever sits in its first slot, which is how a castle wall ends up
+    # wearing the pack's atlas stretched over it instead of its own tiling brick texture.
+    plan = [(mesh,
+             [resolved.get(m.name, {}).get("name") if m else None for m in mesh.materials],
+             material_indices(mesh))
+            for mesh in bpy.data.meshes]
     records = {entry["name"]: entry for entry in distinct_materials(resolved)}
 
     strip_materials()
     created = {name: build_material(name, entry["texture"], entry["color"], entry["alpha"],
                                     entry["transparency"])
                for name, entry in records.items()}
-    for mesh in bpy.data.meshes:
+    for mesh, names, indices in plan:
         mesh.materials.clear()
-        for name in slots.get(mesh.name, []):
+        for name in names:
             mesh.materials.append(created.get(name) if name else None)
+        mesh.polygons.foreach_set("material_index", indices)
     return list(records.values())
 
 
@@ -568,6 +582,9 @@ def convert(job, options, packs):
     reset_scene()
     import_options = supported_options(bpy.ops.import_scene.fbx, FBX_IMPORT_OPTIONS)
     import_options["colors_type"] = "SRGB" if options.get("vertex_colors") == "keep" else "NONE"
+    # Multiplies the unit conversion the FBX asks for, which is 1.0 unless the pack
+    # declares a unit its geometry is not actually in. See scale_overrides.json.
+    import_options["global_scale"] = job.get("scale", 1.0)
     bpy.ops.import_scene.fbx(filepath=src, **import_options)
 
     if options.get("scan_only"):

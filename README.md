@@ -18,6 +18,7 @@ texture_matching.py    resolves texture references     (used by the converter)
 blender_convert.py     runs inside Blender             (used by the converter)
 split_character_head.py splits character heads         (used by blender_convert.py)
 texture_overrides.json manual texture mappings
+scale_overrides.json   unit corrections for packs that declare the wrong one
 
 tools/                 Godot side scripts, copied into your project as <project>/tools/
 synty_packs_fbx/       put the packs here
@@ -29,7 +30,7 @@ materials/             output: material manifests      -> <project>/materials/
 
 Synty FBX do not import cleanly into Godot on their own. The converter deals with five problems:
 
-- **Scale and axes.** The packs are authored in Maya in centimeters, Y-up. A naive conversion gives you a `Node3D` or `Skeleton3D` scaled to 1/100 and rotated 90 degrees, which throws off every `BoneAttachment3D`, collision shape and root motion value. The converter bakes that away, so a character arrives 1.79 m tall, upright, standing at Y = 0, on identity transforms.
+- **Scale and axes.** The packs are authored in Maya in centimeters, Y-up. A naive conversion gives you a `Node3D` or `Skeleton3D` scaled to 1/100 and rotated 90 degrees, which throws off every `BoneAttachment3D`, collision shape and root motion value. The converter bakes that away, so a character arrives 1.79 m tall, upright, standing at Y = 0, on identity transforms. A few packs declare a unit their geometry is not actually in; see [Fixing a pack that converts too small](#fixing-a-pack-that-converts-too-small).
 - **Broken texture references.** Every material points at internal authoring files that were never shipped, usually named for a different pack. The converter works out which shipped texture each one meant.
 - **Duplicated textures.** Synty FBX embed their atlas, so a naive conversion copies a 2048x2048 PNG into every model. The converter references one shared file instead.
 - **Authoring leftovers.** Some models carry a single-key `Take 001` that only restates the import transform, or an Unreal `UCX_` collision hull. Both are dropped. Left in, the take blocks normalization and then reapplies in Godot the very transform normalization exists to remove, and the hull arrives as a visible untextured box over the prop it was meant to bound.
@@ -268,6 +269,35 @@ The file ships with 47 mappings covering 14 packs, since these are facts about S
 
 What is deliberately **not** mapped is anything ambiguous. `Wall_01.psd` in FantasyKingdom could be any of five shipped wall textures, and references to packs you do not own, like `PolygonAncientWorlds_Texture_01.png`, have no counterpart to find. Guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one, so those stay colour-only and stay in the report.
 
+## Fixing a pack that converts too small
+
+An FBX states the unit its geometry is in, and the converter converts from it. Some Synty packs state the wrong one: the geometry is in meters but the file says centimeters, so every model converts a hundred times under size. Nothing else catches this. The file is valid, the axes are right, the node transforms are identity, and the model is simply too small to see when you drag it into a scene.
+
+The run says so:
+
+```
+POLYGON_Dungeon_Pack_SourceFiles_v2: the median model is 0.0245 m across, which means this
+pack's FBX declare a unit their geometry is not in. Add a scale for it to
+scale_overrides.json and reconvert with --force.
+```
+
+`scale` multiplies the conversion the FBX asks for and applies to the whole pack. `files` overrides that for filenames matching a glob, first match winning:
+
+```json
+{
+  "POLYGON_Dungeon_Pack_SourceFiles_v2": {
+    "scale": 100,
+    "files": {
+      "SM_Item_Chr_*": 1
+    }
+  }
+}
+```
+
+Packs are rarely wrong about every file, which is what `files` is for. In the Dungeon pack 780 of 797 models are authored in meters, but the character-held items are genuinely in centimeters and two floor tiles carry a node scale that already compensates. Those seventeen arrive correct and are listed so the pack-wide correction skips them.
+
+The tell for a modular pack is its wall pieces: Synty builds on a 5 m grid, so a wall is 500 units in a centimeter pack and 5 in a meter one. Both convert without complaint; only one is the right size.
+
 ## Verifying
 
 ```bash
@@ -335,12 +365,15 @@ Expected. Godot treats `_Alpha` as a material name convention, strips it and app
 **A model grew instead of shrinking**
 Expected for small static props. See [Size expectations](docs/DESIGN.md#size-expectations).
 
+**A whole pack arrives tiny in Godot**
+Its FBX declare a unit the geometry is not in. See [Fixing a pack that converts too small](#fixing-a-pack-that-converts-too-small).
+
 **Godot is importing my source FBX**
 Keep `synty_packs_fbx/` outside your Godot project, or drop an empty `.gdignore` file in it.
 
 ## Notes
 
-Nothing this repo generates is committed. `assets/` and `materials/` are gitignored, since both are reproducible by rerunning the converter, and both are created on demand. The packs are ignored too: `synty_packs_fbx/` keeps only a `.gitkeep`, so the folder is there to drop packs into without any of them being committed. What is tracked is the tool itself, plus `texture_overrides.json`, which is the one file you are meant to hand edit.
+Nothing this repo generates is committed. `assets/` and `materials/` are gitignored, since both are reproducible by rerunning the converter, and both are created on demand. The packs are ignored too: `synty_packs_fbx/` keeps only a `.gitkeep`, so the folder is there to drop packs into without any of them being committed. What is tracked is the tool itself, plus `texture_overrides.json` and `scale_overrides.json`, which are the two files you are meant to hand edit.
 
 In **your Godot project** the opposite applies. Commit `materials/` there: it is small, and the `.tres` are where you would tune things like `texture_filter` for atlas bleed. Rerunning the generator overwrites them, so those edits are lost; reconverting models does not touch them.
 

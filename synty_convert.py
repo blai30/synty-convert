@@ -19,6 +19,7 @@ import fnmatch
 import json
 import os
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,12 @@ from pathlib import Path
 RESULT_PREFIX = "@@RESULT "
 WORKER_SCRIPT = Path(__file__).with_name("blender_convert.py")
 OVERRIDES_FILE = Path(__file__).with_name("texture_overrides.json")
+SCALES_FILE = Path(__file__).with_name("scale_overrides.json")
+
+# Compared against a pack's median model, never an individual one. Synty ships plenty of
+# coins and gems under 10 cm, but a pack whose typical model is that small has had a unit
+# it is not in folded into every file.
+MIN_PLAUSIBLE_SPAN = 0.1
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import texture_matching
@@ -48,6 +55,7 @@ class Job:
     dst: Path
     pack: str = ""
     split: bool = False
+    scale: float = 1.0
 
 
 @dataclass
@@ -64,6 +72,7 @@ class Totals:
     failures: list = field(default_factory=list)
     materials: dict = field(default_factory=dict)
     split: dict = field(default_factory=dict)
+    spans: dict = field(default_factory=lambda: collections.defaultdict(list))
 
 
 def find_blender(explicit):
@@ -113,6 +122,26 @@ def mark_splits(jobs, patterns):
     """
     for job in jobs:
         job.split = not patterns or any(fnmatch.fnmatch(job.src.name, f"*{p}*") for p in patterns)
+
+
+def mark_scales(jobs):
+    """Attach the unit-scale correction each job's pack needs, if it needs one.
+
+    A Synty FBX declares the unit its geometry is in and the importer converts from it, so
+    normally there is nothing to correct. Some packs declare the wrong one; see
+    ``scale_overrides.json`` for which, and why.
+    """
+    if not SCALES_FILE.exists():
+        return
+    overrides = json.loads(SCALES_FILE.read_text(encoding="utf-8"))
+    for job in jobs:
+        entry = overrides.get(job.pack)
+        if not entry:
+            continue
+        # A pack-wide scale with per-file exceptions, since the packs that get one wrong
+        # tend to get it wrong for most files rather than all of them.
+        job.scale = next((value for pattern, value in entry.get("files", {}).items()
+                          if fnmatch.fnmatch(job.src.stem, pattern)), entry.get("scale", 1.0))
 
 
 def pack_contexts(packs, source_root, output_root):
@@ -168,7 +197,7 @@ def run_worker(blender, jobs, options, contexts, on_result):
     with os.fdopen(handle, "w", encoding="utf-8") as stream:
         json.dump({"options": options, "packs": contexts,
                    "jobs": [{"src": str(j.src), "dst": str(j.dst), "pack": j.pack,
-                             "split": j.split} for j in jobs]}, stream)
+                             "split": j.split, "scale": j.scale} for j in jobs]}, stream)
 
     command = [blender, "--background", "--factory-startup", "--python-exit-code", "1",
                "--python", str(WORKER_SCRIPT), "--", job_path]
@@ -214,6 +243,9 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             entry["sources"].add(material["source"])
         if result.get("split"):
             totals.split[result["src"]] = result["split"]
+        bounds = (result.get("summary") or {}).get("bounds")
+        if bounds:
+            totals.spans[result.get("pack", "")].append(max(bounds[i + 3] - bounds[i] for i in range(3)))
         if result["dst_bytes"] >= result["src_bytes"]:
             totals.grew.append((result["src"], result["src_bytes"], result["dst_bytes"]))
         for warning in result.get("warnings", []):
@@ -313,6 +345,22 @@ def report_materials(totals):
                       f"colour only; add to texture_overrides.json)")
 
 
+def report_scale(totals):
+    """Flag packs whose models come out too small to be real.
+
+    A pack that declares the wrong unit converts to geometry a hundred times under size,
+    and nothing else here notices: the file is valid, the axes are right and the node
+    transforms are identity. It only shows up once a model is dragged into a scene.
+    """
+    for pack, spans in sorted(totals.spans.items()):
+        median = statistics.median(spans)
+        if median >= MIN_PLAUSIBLE_SPAN:
+            continue
+        print(f"\n  {pack}: the median model is {median:.4f} m across, which means this "
+              f"pack's FBX\n  declare a unit their geometry is not in. Add a scale for it to "
+              f"{SCALES_FILE.name}\n  and reconvert with --force.")
+
+
 def report(totals, elapsed):
     print("\n" + "=" * 68)
     print(f"Converted {totals.converted} FBX -> GLB   (failed {totals.failed}, up to date {totals.skipped})")
@@ -391,6 +439,7 @@ def main():
         sys.exit("Nothing matched. Check --src and --packs.")
 
     totals = Totals()
+    mark_scales(jobs)
     if args.split_heads is not None:
         mark_splits(jobs, args.split_heads)
     if not args.force and not args.scan_materials:
@@ -431,6 +480,7 @@ def main():
         sys.exit(1 if totals.failed else 0)
 
     report(totals, time.monotonic() - started)
+    report_scale(totals)
     report_materials(totals)
     if args.split_heads:
         # Only worth saying when names were given: without them most files are props and

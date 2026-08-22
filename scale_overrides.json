@@ -1,0 +1,13 @@
+{
+  "_comment": "Corrections for packs whose FBX declare the wrong unit. Keyed by pack folder name. 'scale' multiplies the unit conversion the FBX asks for and applies to every model in the pack; 'files' overrides that for filenames matching a glob, first match winning. A Synty FBX normally declares centimeters, so its geometry arrives scaled by 1/100 and needs no correction. A pack authored in meters but exported as centimeters converts to models a hundred times too small, and a scale of 100 undoes that. Keys starting with _ are ignored. Run a conversion and read the scale warning to see whether a pack needs an entry.",
+  "POLYGON_Dungeon_Pack_SourceFiles_v2": {
+    "_comment": "780 of this pack's 797 models are authored in meters (a modular wall is 5 units across, where every other Synty pack makes it 500) but every file declares centimeters, so they convert a hundred times too small. The listed files are the exceptions: they are genuinely authored in centimeters, or carry a node scale that already compensates, and arrive at the right size untouched.",
+    "scale": 100,
+    "files": {
+      "SM_Item_Chr_*": 1,
+      "SM_Prop_Candle_*_Particle": 1,
+      "SM_Env_Tiles_Texture_09": 1,
+      "SM_Env_Tiles_Texture_10": 1
+    }
+  }
+}

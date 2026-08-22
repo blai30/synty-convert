@@ -43,9 +43,19 @@ The transform removed from a parent is pushed back down into its children, so wo
 
 This matters because a scaled `Skeleton3D` breaks `BoneAttachment3D` children, physics shapes and root motion in ways that are annoying to discover later.
 
+### When the pack declares the wrong unit
+
+The conversion above is only as good as what the FBX says about itself, and some packs are wrong about it. The Dungeon pack states centimeters in all 797 files while 780 of them are authored in meters, so folding in the stated 1/100 leaves models a hundred times under size. A modular wall is the giveaway: Synty builds on a 5 m grid, so the same wall is 500 units in a centimeter pack and 5 in a meter one, and nothing in the file distinguishes the two.
+
+Nothing downstream catches it either. The GLB is valid, the axes are right, the node transforms are identity and the bounds check passes, because normalization did exactly what it was told. It only surfaces when a model is dragged into a scene and is too small to see.
+
+So there are two parts to this. The correction itself is declared per pack in `scale_overrides.json` and applied as the importer's `global_scale`, which multiplies the conversion the FBX asks for; per-file globs cover the minority of files a pack gets right, since a pack that is wrong is rarely wrong about all of them. And because a wrong unit is otherwise invisible, every run reports any pack whose median model is under 10 cm across. The median rather than any single model, since a pack legitimately ships coins and gems smaller than that; what it cannot ship is a pack where that is the typical size.
+
 ### Verifying it
 
 Normalization must never move geometry, so every run compares the exact world space vertex bounds before and after and warns on drift. Measured drift across both converted packs is zero.
+
+The bounds check deliberately runs after the unit correction rather than across it. A scale override is meant to change the size of the model; drift means normalization moved geometry it was supposed to leave in place.
 
 The check is computed from vertex data rather than `Object.bound_box`, for two reasons found the hard way. `bound_box` is a cache that `transform_apply` does not refresh, so it reports pre-bake numbers. And taking the corners of a local bounding box is not rotation invariant: the box of a rotated mesh is not the rotation of its box, so baking a non-axis-aligned rotation looks like the geometry moved. Both produced false positives before the check was fixed.
 
@@ -58,6 +68,12 @@ On top of that, one `StandardMaterial3D` per atlas is generated so meshes can sh
 Materials are keyed on the resolved texture rather than the FBX material name. Synty's names are Maya leftovers and ambiguous across files: in BattleRoyale, `lambert1` alone maps to four different textures. Untextured materials key on colour and alpha instead, so `glass`, `glass1` and `glass2` collapse into a single `Glass`. That turns 64 source material names into 18 materials.
 
 An unresolved reference still names its material, so two different unresolved textures cannot collapse into one just because their Maya names normalise alike.
+
+### Keeping faces on the right material
+
+The rebuild empties every mesh's material slots before refilling them, so that a canonical name cannot collide with an imported one still holding it. Emptying the slots also silently resets every polygon's `material_index` to zero, so the rebuild has to carry the per-face assignment across by hand.
+
+Without that, a mesh with more than one material collapses onto whatever lands in its first slot. It is invisible in the output at a glance, since the material list is rebuilt correctly and only the faces pointing into it are wrong, and it produces exactly the sort of wrong that is worse than an untextured model: on a castle wall whose UVs span the full 0 to 1 range, the atlas meant for a neighbouring slot arrives stretched across the whole surface. The tell across a converted pack is that no mesh anywhere has more than one primitive.
 
 ### Getting external textures out of Blender
 
