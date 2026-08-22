@@ -294,9 +294,11 @@ scale_overrides.json and reconvert with --force.
 }
 ```
 
-Packs are rarely wrong about every file, which is what `files` is for. In the Dungeon pack 780 of 797 models are authored in meters, but the character-held items are genuinely in centimeters and two floor tiles carry a node scale that already compensates. Those seventeen arrive correct and are listed so the pack-wide correction skips them.
+Packs are rarely wrong about every file, which is what `files` is for. In the Dungeon pack 780 of 797 models are authored in meters, but the character-held items are genuinely in centimeters and two floor tiles carry a node scale that already compensates. Those seventeen arrive correct and are listed so the pack-wide correction skips them. The City pack splits the same way and along its folders: everything under `Models` is in meters, while the characters and vehicles are in centimeters.
 
-The tell for a modular pack is its wall pieces: Synty builds on a 5 m grid, so a wall is 500 units in a centimeter pack and 5 in a meter one. Both convert without complaint; only one is the right size.
+A pack entry with only a `files` key goes the other way, for a pack that is fine apart from a handful of models. BattleRoyale, Nature, Dungeons Realms and Fantasy Kingdom each ship a few, and they are the harder ones to notice: one bridge out of four, one grass tuft out of a set, a candle flame.
+
+The tell for a modular pack is its wall pieces: Synty builds on a 5 m grid, so a wall is 500 units in a centimeter pack and 5 in a meter one. For a single model, compare it against its own numbered siblings; `SM_Env_Bridge_01` is 11.00 x 5.00 x 2.79 units where `SM_Env_Bridge_02` is 1100 x 500 x 279, which is the same bridge authored a hundred times over. Both convert without complaint; only one is the right size.
 
 ## Verifying
 

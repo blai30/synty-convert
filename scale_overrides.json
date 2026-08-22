@@ -1,5 +1,5 @@
 {
-  "_comment": "Corrections for packs whose FBX declare the wrong unit. Keyed by pack folder name. 'scale' multiplies the unit conversion the FBX asks for and applies to every model in the pack; 'files' overrides that for filenames matching a glob, first match winning. A Synty FBX normally declares centimeters, so its geometry arrives scaled by 1/100 and needs no correction. A pack authored in meters but exported as centimeters converts to models a hundred times too small, and a scale of 100 undoes that. Keys starting with _ are ignored. Run a conversion and read the scale warning to see whether a pack needs an entry.",
+  "_comment": "Corrections for packs whose FBX declare the wrong unit. Keyed by pack folder name. 'scale' multiplies the unit conversion the FBX asks for and applies to every model in the pack; 'files' overrides that for filenames matching a glob, first match winning. A Synty FBX normally declares centimeters, so its geometry arrives scaled by 1/100 and needs no correction. A pack authored in meters but exported as centimeters converts to models a hundred times too small, and a scale of 100 undoes that. A pack with only a 'files' key is otherwise fine and has individual models that are not. Keys starting with _ are ignored. Run a conversion and read the scale warning to see whether a pack needs an entry.",
   "POLYGON_Dungeon_Pack_SourceFiles_v2": {
     "_comment": "780 of this pack's 797 models are authored in meters (a modular wall is 5 units across, where every other Synty pack makes it 500) but every file declares centimeters, so they convert a hundred times too small. The listed files are the exceptions: they are genuinely authored in centimeters, or carry a node scale that already compensates, and arrive at the right size untouched.",
     "scale": 100,
@@ -8,6 +8,44 @@
       "SM_Prop_Candle_*_Particle": 1,
       "SM_Env_Tiles_Texture_09": 1,
       "SM_Env_Tiles_Texture_10": 1
+    }
+  },
+  "POLYGON_City_Source_Files": {
+    "_comment": "Same mistake as the Dungeon pack, and it splits by folder. Everything under SourceFiles/Models is authored in meters: an office block is 15 x 15 x 30 units, which is a building in meters and a desk toy in centimeters. The characters and vehicles are authored in centimeters and are already right, at 2.04 m tall and 5.6 m long.",
+    "scale": 100,
+    "files": {
+      "SK_Character_*": 1,
+      "SM_Veh_Car_*": 1
+    }
+  },
+  "POLYGON_BattleRoyale_Source_Files_v4": {
+    "_comment": "Individual models authored in meters in a pack that is otherwise centimeters. SM_Env_Bridge_01 is 11.00 x 5.00 x 2.79 units against SM_Env_Bridge_02's 1100 x 500 x 279, the same bridge a hundred times over. The fence panel is 2.02 x 0.31 x 3.29, which is a fence in meters and a doll house part in centimeters.",
+    "files": {
+      "SM_Env_Bridge_01": 100,
+      "SM_Prop_WireFence_01": 100,
+      "SM_Prop_WireFence_02": 100,
+      "SM_Env_Rubble_Stone_01": 100,
+      "SM_Env_Rubble_Stone_02": 100
+    }
+  },
+  "POLYGON_Nature_Source_Files_v2": {
+    "_comment": "SM_Plant_Grass_01 is 0.30 units across where the rest of the SM_Plant_Grass set is 82.",
+    "files": {
+      "SM_Plant_Grass_01": 100
+    }
+  },
+  "POLYGON_Dungeons_Realms_SourceFiles_v2": {
+    "_comment": "A candle flame 0.04 units wide and a light shaft volume of exactly 1 x 1 x 3.59; both are meters, and at centimeters they are too small to see.",
+    "files": {
+      "SM_Prop_Candle_Flame_01": 100,
+      "FX_SunShafts": 100
+    }
+  },
+  "PolygonFantasyKingdom": {
+    "_comment": "The same two shared assets the Dungeons Realms pack ships, under one different name.",
+    "files": {
+      "SM_Prop_Candle_Flame_01": 100,
+      "SunShafts": 100
     }
   }
 }

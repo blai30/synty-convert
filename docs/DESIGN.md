@@ -37,9 +37,11 @@ Measured in Godot, an unnormalized house arrives as a `MeshInstance3D` with `sca
 - mesh vertices are baked with the rotation and scale
 - armature bone rest poses are baked the same way
 - bone local translation curves are rescaled, since bone space shrank by the same factor
-- bone parented helpers, such as Synty's `shoulderattach` sockets, have their offsets rescaled
+- bone parented children, such as Synty's `shoulderattach` sockets or a ballista's bolt, are baked through the same recursion, driven by the factor rather than by their own transform
 
 The transform removed from a parent is pushed back down into its children, so world placement is preserved exactly. Objects with animated transforms are left alone, since baking would invalidate their curves.
+
+A bone parented child is the one case where there is nothing on the child to remove. The importer folds the unit conversion into its parent inverse instead, so the child arrives with an identity scale and a mesh still in centimeters, and the factor is the only thing that carries the correction. It has to reach the mesh and not just the offset: rescaling the offset alone puts a ballista's bolt a hundred times the size of the ballista, on an identity node that nothing downstream flags, since the check for that only looks at scene roots.
 
 This matters because a scaled `Skeleton3D` breaks `BoneAttachment3D` children, physics shapes and root motion in ways that are annoying to discover later.
 

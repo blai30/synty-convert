@@ -280,9 +280,14 @@ def bake_hierarchy(obj, inherited, warnings):
         child.matrix_basis = child_locals[child]
     for child in children:
         if child.parent_type == "BONE":
-            # Bone space just shrank by the same factor the rest pose did.
+            # Bone space just shrank by the same factor the rest pose did, and a bone
+            # parented child carries none of that on its own transform: the importer folds
+            # it into the parent inverse instead. So the factor is the whole of what has to
+            # be pushed down, and it has to reach the child's mesh and not just its offset.
+            # Rescaling the offset alone leaves a Synty ballista's bolt a hundred times the
+            # size of the ballista.
             if factor is not None:
-                child.matrix_basis.translation = child.matrix_basis.translation * factor
+                bake_hierarchy(child, Matrix.Scale(factor, 4), warnings)
         else:
             result = bake_hierarchy(child, rotation_scale, warnings)
             factor = factor if factor is not None else result
