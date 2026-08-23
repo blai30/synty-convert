@@ -284,11 +284,17 @@ def as_res_path(path, output_root, res_prefix):
     return f"{res_prefix.rstrip('/')}/" + str(relative).replace(os.sep, "/")
 
 
+def channel_of(entry, name):
+    """One resolved texture channel of a material record, or an empty one."""
+    return (entry.get("channels") or {}).get(name) or {}
+
+
 def write_manifests(totals, materials_root, output_root, res_prefix):
     """Write one manifest per pack for the Godot material generator to consume.
 
     The converter deliberately stops here rather than authoring .tres itself, so that
-    Godot assigns every resource id and uid.
+    Godot assigns every resource id and uid. Every channel the GLB carries is described
+    here too, so a shared material and the model's own render the same way.
     """
     written = []
     for pack, materials in sorted(totals.materials.items()):
@@ -296,17 +302,38 @@ def write_manifests(totals, materials_root, output_root, res_prefix):
             continue
         entries = []
         for name, entry in sorted(materials.items()):
+            albedo, emission = channel_of(entry, "albedo"), channel_of(entry, "emission")
+            normal = channel_of(entry, "normal")
             record = {"name": name, "used_by": entry["used_by"],
                       "source_names": sorted(entry["sources"])}
-            if entry.get("texture"):
-                record["albedo_texture"] = as_res_path(entry["texture"], output_root, res_prefix)
+            if albedo.get("texture"):
+                record["albedo_texture"] = as_res_path(albedo["texture"], output_root, res_prefix)
             else:
                 record["albedo_color"] = [*(linear_to_srgb(c) for c in entry["color"]), entry["alpha"]]
+            if emission.get("texture"):
+                # The map stands in for the emissive colour, the way Maya treats a connected
+                # file, so the colour is not written alongside it.
+                record["emission_texture"] = as_res_path(emission["texture"], output_root, res_prefix)
+                record["emission_energy"] = entry["emission_strength"]
+            elif any(entry["emission_color"]):
+                record["emission_color"] = [linear_to_srgb(c) for c in entry["emission_color"]]
+                record["emission_energy"] = entry["emission_strength"]
+            if normal.get("texture"):
+                record["normal_texture"] = as_res_path(normal["texture"], output_root, res_prefix)
+                record["normal_scale"] = entry["normal_strength"]
+            record["roughness"] = entry["roughness"]
+            record["metallic"] = entry["metallic"]
             if entry.get("transparency"):
                 record["transparency"] = entry["transparency"]
-            if entry.get("reference"):
-                record["reference"] = entry["reference"]
-                record["match"] = entry.get("method")
+            for channel in ("albedo", "emission", "normal", "alpha"):
+                asked = channel_of(entry, channel)
+                # A mask naming the file the material is coloured with says nothing new.
+                if not asked.get("reference") or (channel == "alpha" and asked.get("reference")
+                                                  == albedo.get("reference")):
+                    continue
+                key = "reference" if channel == "albedo" else channel + "_reference"
+                record[key] = asked["reference"]
+                record["match" if channel == "albedo" else channel + "_match"] = asked.get("method")
             entries.append(record)
         target = materials_root / pack / "materials.json"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -324,25 +351,39 @@ def report_materials(totals):
     for pack, materials in sorted(totals.materials.items()):
         if not materials:
             continue
-        counts = collections.Counter(e.get("method") or "unresolved" for e in materials.values())
-        untextured = sum(1 for e in materials.values() if not e.get("reference"))
-        unresolved = sorted(e["reference"] for e in materials.values()
-                            if e.get("reference") and not e.get("method"))
+        # Every channel resolves through the same matcher, so all of them are reviewable.
+        # A mask that names the same file the material is coloured with resolved with it, so
+        # listing it again would say the same thing twice.
+        asked = [(entry, name, channel_of(entry, name)) for entry in materials.values()
+                 for name in ("albedo", "emission", "normal", "alpha")
+                 if channel_of(entry, name).get("reference")
+                 and not (name == "alpha" and channel_of(entry, name).get("reference")
+                          == channel_of(entry, "albedo").get("reference"))]
+        counts = collections.Counter(found.get("method") or "unresolved" for _, _, found in asked)
+        untextured = sum(1 for e in materials.values() if not channel_of(e, "albedo").get("reference"))
+        extra = collections.Counter(name for e in materials.values() for name in
+                                    ("emission", "normal") if channel_of(e, name).get("texture"))
         print(f"  {pack}: {len(materials)} materials  "
               f"({counts['exact'] + counts['normalized']} exact, {counts['override']} override, "
-              f"{counts['tokens'] + counts['trimmed']} heuristic, {len(unresolved)} unresolved, "
+              f"{counts['tokens'] + counts['trimmed']} heuristic, {counts['unresolved']} unresolved, "
               f"{untextured} untextured)")
-        for entry in sorted(materials.values(), key=lambda e: -e["used_by"]):
+        if extra:
+            print("     " + ", ".join(f"{count} carry an {name} map" if name == "emission"
+                                      else f"{count} carry a {name} map"
+                                      for name, count in sorted(extra.items())))
+        for entry, channel, found in sorted(asked, key=lambda item: -item[0]["used_by"]):
             # A trimmed match dropped tokens to find its winner, so it is a guess like any
             # other heuristic and belongs in front of the reader, not folded into the exact count.
-            if entry.get("method") in ("tokens", "trimmed", "override"):
-                label = "manual " if entry["method"] == "override" else "review "
-                print(f"     {label} {entry['reference']} -> {entry['name']} "
+            if found.get("method") in ("tokens", "trimmed", "override"):
+                label = "manual " if found["method"] == "override" else "review "
+                suffix = "" if channel == "albedo" else f" [{channel}]"
+                print(f"     {label} {found['reference']} -> {entry['name']}{suffix} "
                       f"({entry['used_by']} files)")
-        for entry in sorted(materials.values(), key=lambda e: -e["used_by"]):
-            if entry.get("reference") and not entry.get("method"):
-                print(f"     UNRESOLVED  {entry['reference']}  ({entry['used_by']} files, "
-                      f"colour only; add to texture_overrides.json)")
+        for entry, channel, found in sorted(asked, key=lambda item: -item[0]["used_by"]):
+            if not found.get("method"):
+                lost = "colour only" if channel == "albedo" else f"no {channel} map"
+                print(f"     UNRESOLVED  {found['reference']}  ({entry['used_by']} files, "
+                      f"{lost}; add to texture_overrides.json)")
 
 
 def report_scale(totals):

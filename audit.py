@@ -89,17 +89,20 @@ def audit_manifests(root, dst, res_prefix, failures, stats):
         manifest = json.loads(path.read_text(encoding="utf-8"))
         for entry in manifest["materials"]:
             stats["materials"] += 1
-            texture = entry.get("albedo_texture")
-            if not texture and not entry.get("albedo_color"):
+            if not entry.get("albedo_texture") and not entry.get("albedo_color"):
                 failures["material has neither texture nor colour"].append(f"{path}: {entry['name']}")
-            if not texture:
+            if not entry.get("albedo_texture"):
                 stats["materials_without_texture"] += 1
-                continue
-            resolved = on_disk(texture, res_prefix, dst)
-            if resolved is None:
-                failures[f"manifest texture is not under {res_prefix}"].append(f"{path}: {texture}")
-            elif not resolved.exists():
-                failures["manifest texture does not exist"].append(f"{path}: {texture}")
+            for key in ("albedo_texture", "emission_texture", "normal_texture"):
+                texture = entry.get(key)
+                if not texture:
+                    continue
+                stats[key] += 1
+                resolved = on_disk(texture, res_prefix, dst)
+                if resolved is None:
+                    failures[f"manifest texture is not under {res_prefix}"].append(f"{path}: {texture}")
+                elif not resolved.exists():
+                    failures["manifest texture does not exist"].append(f"{path}: {texture}")
         # .tres files only exist once the user has run the generator in their project.
         for tres in path.parent.glob("*.tres"):
             stats["tres"] += 1
@@ -135,6 +138,8 @@ def main():
           f"pointing at {len(stats['textures'])} distinct texture files")
     print(f"manifests {stats['manifests']}, materials {stats['materials']} "
           f"({stats['materials_without_texture']} colour only), tres {stats['tres']}")
+    if stats["emission_texture"] or stats["normal_texture"]:
+        print(f"extra maps: {stats['emission_texture']} emission, {stats['normal_texture']} normal")
     if stats["primitives_without_material"]:
         print(f"primitives with no material: {stats['primitives_without_material']}")
 

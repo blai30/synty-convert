@@ -63,15 +63,34 @@ func _build(entry: Dictionary, missing: Array[String]) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.resource_name = str(entry["name"])
 
-	if entry.has("albedo_texture"):
-		var path := str(entry["albedo_texture"])
-		if ResourceLoader.exists(path):
-			material.albedo_texture = load(path)
-		else:
-			missing.append(path)
+	material.albedo_texture = _texture(entry, "albedo_texture", missing)
 	if entry.has("albedo_color"):
 		var color: Array = entry["albedo_color"]
 		material.albedo_color = Color(color[0], color[1], color[2], color[3])
+
+	var emission := _texture(entry, "emission_texture", missing)
+	if emission != null or entry.has("emission_color"):
+		material.emission_enabled = true
+		material.emission_energy_multiplier = float(entry.get("emission_energy", 1.0))
+		if emission != null:
+			material.emission_texture = emission
+			# The map is the whole of the emission, the way Maya treats a file connected
+			# over a colour. Multiply against white leaves the map exactly as authored,
+			# where the default add operator would lift it by the emission colour.
+			material.emission = Color.WHITE
+			material.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+		else:
+			var glow: Array = entry["emission_color"]
+			material.emission = Color(glow[0], glow[1], glow[2])
+
+	var normal := _texture(entry, "normal_texture", missing)
+	if normal != null:
+		material.normal_enabled = true
+		material.normal_texture = normal
+		material.normal_scale = float(entry.get("normal_scale", 1.0))
+
+	material.roughness = float(entry.get("roughness", 1.0))
+	material.metallic = float(entry.get("metallic", 0.0))
 
 	match str(entry.get("transparency", "")):
 		"alpha":
@@ -80,6 +99,17 @@ func _build(entry: Dictionary, missing: Array[String]) -> StandardMaterial3D:
 			# Cutout foliage and fences: keeps them writing depth and sorting correctly.
 			material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 	return material
+
+
+func _texture(entry: Dictionary, key: String, missing: Array[String]) -> Texture2D:
+	## The texture a manifest entry names, or null when the entry names none.
+	if not entry.has(key):
+		return null
+	var path := str(entry[key])
+	if not ResourceLoader.exists(path):
+		missing.append(path)
+		return null
+	return load(path)
 
 
 func _materials_dir() -> String:

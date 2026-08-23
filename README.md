@@ -32,6 +32,7 @@ Synty FBX do not import cleanly into Godot on their own. The converter deals wit
 
 - **Scale and axes.** The packs are authored in Maya in centimeters, Y-up. A naive conversion gives you a `Node3D` or `Skeleton3D` scaled to 1/100 and rotated 90 degrees, which throws off every `BoneAttachment3D`, collision shape and root motion value. The converter bakes that away, so a character arrives 1.79 m tall, upright, standing at Y = 0, on identity transforms. A few packs declare a unit their geometry is not actually in; see [Fixing a pack that converts too small](#fixing-a-pack-that-converts-too-small).
 - **Broken texture references.** Every material points at internal authoring files that were never shipped, usually named for a different pack. The converter works out which shipped texture each one meant.
+- **Dropped material channels.** A handful of Synty materials carry an emissive map, a normal map or a transparency mask alongside their atlas. The converter carries every channel the FBX declares across to the GLB; see [What the materials carry](#what-the-materials-carry).
 - **Duplicated textures.** Synty FBX embed their atlas, so a naive conversion copies a 2048x2048 PNG into every model. The converter references one shared file instead.
 - **Authoring leftovers.** Some models carry a single-key `Take 001` that only restates the import transform, or an Unreal `UCX_` collision hull. Both are dropped. Left in, the take blocks normalization and then reapplies in Godot the very transform normalization exists to remove, and the hull arrives as a visible untextured box over the prop it was meant to bound.
 - **Size.** 1039 models across two packs go from 528.7 MB to 152.9 MB, a 71.1% reduction.
@@ -236,6 +237,38 @@ Split     154 head(s) off 81 character model(s), 2 left open at the neck
 
 Across all eleven packs here that is 2 of 154. Both are meshes whose vendor geometry is already broken before conversion. If a model you want as the player character shows up in that count, check it in Godot with the head hidden before building on it.
 
+## What the materials carry
+
+Every channel an FBX declares is carried across. The converter reads each one from the Principled BSDF socket Blender's FBX importer drove, so a material in the GLB says what the source material said, and the generated `.tres` says the same thing again.
+
+| FBX property | Becomes | Declared across 10,488 source materials |
+| --- | --- | --- |
+| `DiffuseColor` | base colour texture, or the colour where no map is bound | 9,943 |
+| `TransparentColor` | alpha, cut out at 0.5 | 179 |
+| `EmissiveColor` | emissive texture, or emissive colour | 79 map, 4 colour |
+| `NormalMap` / `Bump` | normal map, with tangents exported for those models | 125 |
+| `Shininess` | roughness, as `1 - sqrt(shininess) / 10` | 753 |
+| `ReflectionFactor` | metallic | 710 |
+
+Two things are worth knowing before you go looking for glowing props. **Only two packs wire up emission at all**: NatureBiomes AridDesert on 77 materials, and SciFiSpace on 2. **The models named for a glow do not have any.** `SM_Env_GlowingOrb_01`, `SM_Veh_WarpGate_Glow_01`, the Dungeons Realms obelisks and the Military glowstick each declare a single diffuse texture and nothing else. Several packs ship an `Emissive_0x.png` atlas that no FBX in the pack references. That glow lived in Unity materials, which are not part of the source packs, so there is nothing in the FBX to recover.
+
+Normal maps are similar. Of 125 bindings, 87 name no file at all (the path was emptied before export) and most of the rest name a file the pack never shipped, which leaves 5 that resolve. They are reported like any other unresolved reference.
+
+Materials are still keyed on their atlas, but a material that carries anything beyond one takes a qualifier so it cannot collapse into the plain material wearing the same atlas and quietly lose a map:
+
+```
+PolygonNatureBiomesS2_AridDesert_Texture_01                      the atlas alone
+PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A        the same atlas, plus an emissive map
+PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A_Cutout the same again, masked
+Lambert_A45_808080                                               no atlas: alpha 0.45, grey
+```
+
+Qualifiers come from the material itself and never from the order files happen to be converted in, so one name means one thing across a whole pack.
+
+Two limits are worth stating. glTF carries coverage on the base colour texture's alpha channel rather than in a map of its own, so a mask has to be the file the material is coloured with. Every Synty material that binds a mask already names the same file, apart from eleven Military fences that name only the mask, which then supplies their colour too. And a mask whose file has no alpha channel cannot be expressed at all; those are warned about and left opaque.
+
+Godot imports a normal map correctly on its own, but check the texture's **Import** dock shows **Normal Map** under compression if a surface looks flat.
+
 ## Fixing unresolved textures
 
 Synty's FBX reference authoring files that never shipped, so some references cannot be matched. When that happens the material keeps its colour and is reported.
@@ -265,7 +298,7 @@ Sometimes the texture a pack asks for is one **another pack** ships. Synty's bio
 
 That other pack has to be converted too, since the material points at its mirrored copy under `assets/`. Convert only one of the pair and the run says so and leaves the material colour only.
 
-The file ships with 47 mappings covering 14 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. A working file's name is not evidence of what it holds: `RopeBridge.png` is the atlas for 45 Meadow Forest props, none of which is a rope bridge, because the artist named the file in the Tropical Jungle scene that does have one. If you own a pack that is not listed, run `--scan-materials` and add what you find.
+The file ships with 48 mappings covering 14 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. A working file's name is not evidence of what it holds: `RopeBridge.png` is the atlas for 45 Meadow Forest props, none of which is a rope bridge, because the artist named the file in the Tropical Jungle scene that does have one. If you own a pack that is not listed, run `--scan-materials` and add what you find.
 
 What is deliberately **not** mapped is anything ambiguous. `Wall_01.psd` in FantasyKingdom could be any of five shipped wall textures, and references to packs you do not own, like `PolygonAncientWorlds_Texture_01.png`, have no counterpart to find. Guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one, so those stay colour-only and stay in the report.
 

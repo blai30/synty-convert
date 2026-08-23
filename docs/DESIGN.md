@@ -71,6 +71,43 @@ Materials are keyed on the resolved texture rather than the FBX material name. S
 
 An unresolved reference still names its material, so two different unresolved textures cannot collapse into one just because their Maya names normalise alike.
 
+### Reading a channel, not the first image node
+
+Blender's FBX importer drives one Principled BSDF socket per FBX material property, and creates image nodes in the order the FBX connects them. Reading the first image node in a material therefore returns the emissive map about as readily as the albedo. In `SM_Env_Backrgound_Hill_01`, whose material connects both, the emissive comes first:
+
+```
+Image Texture      -> Principled BSDF.Emission Color   PolygonFantasyGothic_Emissive_01_A.png
+Image Texture.001  -> Principled BSDF.Base Color       PolygonFantasyGothic_Texture_01_A.png
+Image Texture.002  -> Normal Map.Color
+```
+
+Channels are read by following the link into the socket instead, which is the only way to know what a map is for. Before that, 77 AridDesert materials wore their emissive mask as an albedo and dropped the atlas entirely, and it looked like an ordinary texture match in the report.
+
+The same read gets the rest of the material for free, so every property the FBX declares now survives: base colour, coverage, emission, normals, and the shading response Blender derives from `Shininess` and `ReflectionFactor`. What a channel is *for* comes from the socket; what it *points at* still goes through the same matcher, the same overrides and the same report, so an emissive map that fails to resolve is as visible as an albedo that does.
+
+Only the map applies where a material declares both a map and a value. Maya ignores a colour once a file is connected over it, so a textured material exports with a white factor rather than multiplying the two.
+
+### Telling two materials apart
+
+Once a material is more than an atlas, keying on the atlas alone is not enough: a material carrying an emissive map and a plain one wearing the same atlas would collapse, and one of them would silently lose a channel. SciFiSpace makes this concrete, with two materials that share `PolygonSciFiSpace_Texture_01_A` and differ only in which emissive map they add.
+
+So the name carries every property that would make two materials render differently, as a qualifier on the atlas name:
+
+```
+PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A_Cutout
+Lambert_A45_808080
+```
+
+Qualifiers are derived from the material and never from collision order, which matters because names are assigned per file inside Blender while the manifest is merged across the whole pack afterwards. A suffix handed out because two materials happened to meet in one file would mean something different in the next file, and the merge would quietly join records that are not the same material.
+
+### Coverage has to ride on the base colour texture
+
+glTF has no alpha map. Coverage lives in the base colour texture's alpha channel, so a mask has to be the file the material is coloured with. Across 10,488 source materials, 179 bind `TransparentColor` and every one of them names the file it already colours with, apart from eleven Military fences that bind only a mask, which then supplies their colour too.
+
+glTF has no cutout flag either. The exporter infers `alphaMode: MASK` from a threshold node in front of the Alpha socket, so the converter builds one. That is a real choice rather than a reading of the file, since FBX says only that a mask is bound: every Synty mask is a cutout, and cutouts sort correctly where blending does not. It also makes the GLB and the generated `.tres` agree, where before one said blend and the other said scissor.
+
+The filename heuristic this replaced (treat a texture as cutout when `alpha` appears in its name) turned out to be both unnecessary and insufficient. Every texture it caught also declares `TransparentColor`, and it missed 170 materials that declare one without saying so in the name.
+
 ### Keeping faces on the right material
 
 The rebuild empties every mesh's material slots before refilling them, so that a canonical name cannot collide with an imported one still holding it. Emptying the slots also silently resets every polygon's `material_index` to zero, so the rebuild has to carry the per-face assignment across by hand.

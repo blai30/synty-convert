@@ -16,6 +16,7 @@ flagged ``split`` also have any character head separated onto its own node first
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import struct
@@ -39,6 +40,22 @@ RESULT_PREFIX = "@@RESULT "
 UNIFORM_SCALE_TOLERANCE = 1e-5
 IDENTITY_TOLERANCE = 1e-6
 STATIC_CURVE_TOLERANCE = 1e-6
+
+# Blender's FBX importer drives one Principled BSDF socket per FBX material property. These
+# are the four Synty's files actually connect anything to, and the name each becomes in a
+# material record.
+CHANNEL_SOCKETS = {"albedo": "Base Color", "alpha": "Alpha", "emission": "Emission Color",
+                   "normal": "Normal"}
+
+# What the importer produces for a material that declares no shading properties at all,
+# which is 93% of the corpus: FBX Shininess defaults to 20 and Blender converts it with
+# roughness = 1 - sqrt(shininess) / 10. Derived rather than written out so a material that
+# says nothing is never mistaken for one that asked for this exact value.
+DEFAULT_ROUGHNESS = round(1.0 - math.sqrt(20.0) / 10.0, 4)
+
+# Coverage below this is a hole. FBX says only that a mask is bound, never how to apply it;
+# every Synty mask is a cutout, and cutouts sort correctly where blending does not.
+ALPHA_CUTOFF = 0.5
 
 FBX_IMPORT_OPTIONS = {
     "use_anim": True,
@@ -308,110 +325,304 @@ def strip_materials():
             collection.remove(datablock)
 
 
+def image_behind(socket):
+    """The image node feeding a socket, seen through the Normal Map node when there is one."""
+    if not socket.is_linked:
+        return None
+    node = socket.links[0].from_node
+    if node.type == "NORMAL_MAP":
+        return image_behind(node.inputs["Color"])
+    return node if node.type == "TEX_IMAGE" and node.image is not None else None
+
+
+def texture_reference(node):
+    """The file an image node asks for, or None when the FBX named no file at all.
+
+    Some Synty materials carry a texture slot whose path was emptied before export. Blender
+    falls back to the FBX object name for those, which is not a file name and cannot be
+    resolved against anything, so there is nothing to carry across.
+    """
+    name = os.path.basename(node.image.filepath.replace("\\", "/")) or node.image.name
+    suffix = os.path.splitext(name)[1].lower()
+    return name if suffix in texture_matching.TEXTURE_SUFFIXES else None
+
+
+def socket_value(bsdf, name, fallback):
+    """A Principled input's own value, tolerating sockets a Blender version may not have."""
+    socket = bsdf.inputs.get(name)
+    if socket is None:
+        return fallback
+    value = socket.default_value
+    if isinstance(fallback, list):
+        return [round(channel, 4) for channel in value[:3]]
+    return round(value, 4)
+
+
 def describe_material(material):
-    """Read the texture reference, colour and alpha out of an imported FBX material."""
-    info = {"source": material.name, "reference": None, "color": [1.0, 1.0, 1.0], "alpha": 1.0}
-    if not material.use_nodes or material.node_tree is None:
+    """Read every channel Blender's FBX importer populated from the source material.
+
+    Channels are read by following the link into each Principled socket rather than by
+    walking the node list: image nodes are created in FBX connection order, so the first
+    one in a material is the emissive map as often as it is the albedo.
+    """
+    info = {"source": material.name, "references": dict.fromkeys(CHANNEL_SOCKETS),
+            "color": [1.0, 1.0, 1.0], "alpha": 1.0, "emission_color": [0.0, 0.0, 0.0],
+            "emission_strength": 1.0, "roughness": DEFAULT_ROUGHNESS, "metallic": 0.0,
+            "normal_strength": 1.0}
+    tree = material.node_tree if material.use_nodes else None
+    bsdf = tree.nodes.get("Principled BSDF") if tree is not None else None
+    if bsdf is None:
         return info
-    for node in material.node_tree.nodes:
-        if node.type == "TEX_IMAGE" and node.image is not None and info["reference"] is None:
-            path = node.image.filepath.replace("\\", "/")
-            info["reference"] = os.path.basename(path) or node.image.name
-        elif node.type == "BSDF_PRINCIPLED":
-            info["color"] = [round(value, 4) for value in node.inputs["Base Color"].default_value[:3]]
-            info["alpha"] = round(node.inputs["Alpha"].default_value, 4)
+
+    for channel, socket in CHANNEL_SOCKETS.items():
+        node = image_behind(bsdf.inputs[socket]) if socket in bsdf.inputs else None
+        info["references"][channel] = texture_reference(node) if node else None
+    # A socket's own value is what the FBX declared for that property. It only describes the
+    # material where no map covers it, which is how Maya treats a connected file.
+    info["color"] = socket_value(bsdf, "Base Color", info["color"])
+    info["alpha"] = socket_value(bsdf, "Alpha", info["alpha"])
+    info["emission_color"] = socket_value(bsdf, "Emission Color", info["emission_color"])
+    info["emission_strength"] = socket_value(bsdf, "Emission Strength", info["emission_strength"])
+    info["roughness"] = socket_value(bsdf, "Roughness", info["roughness"])
+    info["metallic"] = socket_value(bsdf, "Metallic", info["metallic"])
+    normal = bsdf.inputs.get("Normal")
+    if normal is not None and normal.is_linked and normal.links[0].from_node.type == "NORMAL_MAP":
+        info["normal_strength"] = round(normal.links[0].from_node.inputs["Strength"].default_value, 4)
     return info
 
 
-def canonical_name(source_name, texture_path, reference=None):
-    """A stable, meaningful material name shared by every mesh that uses it.
+def tokens_of(text):
+    return [token for token in re.split(r"[^A-Za-z0-9]+", text) if token]
 
-    Textured materials are named for their atlas, since Synty's own names are Maya
-    leftovers that are ambiguous across files: lambert1 alone maps to four textures.
-    An unresolved reference still names the material, so that two different unresolved
-    textures cannot collapse into one just because their Maya names normalise alike.
+
+def stem_of(channel):
+    """The texture name a channel settled on, resolved where possible and asked-for where not."""
+    named = channel.get("texture_source") or channel.get("reference") or ""
+    return os.path.splitext(os.path.basename(named))[0]
+
+
+def unshared_tail(stem, base):
+    """The part of a map's name that the material's base name does not already say.
+
+    PolygonSciFiSpace_Emissive_01 against a PolygonSciFiSpace_Texture_01_A material is just
+    Emissive_01, which keeps a qualified name readable while still telling the pack's two
+    emissive maps apart.
     """
-    if texture_path:
-        return os.path.splitext(os.path.basename(texture_path))[0]
-    if reference:
-        return re.sub(r"[^A-Za-z0-9]+", "_", os.path.splitext(reference)[0]).strip("_")
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", source_name).strip("_")
+    stem_tokens, base_tokens = tokens_of(stem), tokens_of(base)
+    shared = 0
+    while (shared < len(stem_tokens) and shared < len(base_tokens)
+           and stem_tokens[shared].lower() == base_tokens[shared].lower()):
+        shared += 1
+    return "_".join(stem_tokens[shared:] or stem_tokens)
+
+
+def hex_of(color):
+    return "".join("%02X" % min(255, max(0, round(channel * 255))) for channel in color)
+
+
+def base_name(record):
+    """What a material is called before anything beyond its atlas is taken into account."""
+    albedo = record["channels"].get("albedo") or {}
+    if albedo.get("texture_source"):
+        return os.path.splitext(os.path.basename(albedo["texture_source"]))[0]
+    if albedo.get("reference"):
+        return re.sub(r"[^A-Za-z0-9]+", "_", os.path.splitext(albedo["reference"])[0]).strip("_")
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", record["source"]).strip("_")
     # glass, glass1 and glass2 are the same material in three files.
     cleaned = re.sub(r"\d+$", "", cleaned) or "Material"
     return cleaned[:1].upper() + cleaned[1:]
 
 
-def build_material(name, texture_path, color, alpha, transparency):
-    """Create a clean Principled BSDF material, optionally driven by an external texture."""
+def canonical_name(record):
+    """A stable, meaningful name shared by every mesh whose material is identical.
+
+    Materials are named for their atlas, since Synty's own names are Maya leftovers that are
+    ambiguous across files: lambert1 alone maps to four textures. Every property that would
+    make two materials render differently then adds a qualifier, so a material that also
+    carries an emissive map cannot collapse into the plain one wearing the same atlas and
+    quietly lose it. Qualifiers come from the material itself and never from the order files
+    happen to be converted in, so one name means one thing across a whole pack.
+    """
+    channels = record["channels"]
+    base = base_name(record)
+    parts = [base]
+
+    if channels.get("emission"):
+        parts.append(unshared_tail(stem_of(channels["emission"]), base))
+    elif any(record["emission_color"]):
+        parts.append("Emissive" + hex_of(record["emission_color"]))
+    if channels.get("normal"):
+        parts.append(unshared_tail(stem_of(channels["normal"]), base))
+    if channels.get("alpha"):
+        parts.append("Cutout")
+    elif record["alpha"] < 0.999:
+        parts.append("A%02d" % round(record["alpha"] * 100))
+    if record["roughness"] != DEFAULT_ROUGHNESS:
+        parts.append("R%02d" % round(record["roughness"] * 100))
+    if record["metallic"]:
+        parts.append("M%02d" % round(record["metallic"] * 100))
+    if not channels.get("albedo"):
+        # Nothing above names the colour, and colour is all an untextured material is.
+        parts.append(hex_of(record["color"]))
+    return re.sub(r"_+", "_", "_".join(part for part in parts if part)).strip("_")
+
+
+def resolve_texture(reference, context, warnings, channel):
+    """Resolve one texture reference to the mirrored copy of it in the output tree."""
+    if not reference:
+        return None
+    source_root = context.get("source_root", "")
+    output_root = context.get("output_root", "")
+    match = texture_matching.resolve(reference, context.get("textures", []),
+                                     context.get("overrides", {}), context.get("foreign", {}))
+    label = "" if channel == "albedo" else channel + " "
+    texture_path = None
+    if match:
+        # Point at the mirrored copy in the output tree, not the source pack.
+        relative = os.path.relpath(match.path, source_root)
+        candidate = os.path.join(output_root, relative)
+        if os.path.exists(candidate):
+            texture_path = candidate
+        elif output_root and os.path.isdir(output_root):
+            # Absent output pack means this is a scan, not a conversion.
+            if relative.startswith(os.pardir):
+                # An override reached into a pack that has not been converted, so the
+                # mirrored texture it points at does not exist yet.
+                warnings.append(f"cross-pack {label}texture needs its pack converted too: "
+                                f"{os.path.normpath(relative)}")
+            else:
+                warnings.append(f"{label}texture not mirrored yet: {relative}")
+    else:
+        warnings.append(f"unresolved {label}texture reference '{reference}'")
+    return {"texture": texture_path, "texture_source": match.path if match else None,
+            "reference": reference, "method": match.method if match else None,
+            "score": match.score if match else None}
+
+
+def transparency_of(record):
+    """How a material is meant to blend: a bound mask cuts out, a bare value fades.
+
+    A mask that never resolved leaves nothing to cut with, so the material stays opaque
+    rather than claiming a cutout an engine would then set up a shader for and never use.
+    The name still records that one was asked for, and resolving it later brings it back.
+    """
+    if (record["channels"].get("alpha") or {}).get("texture_source"):
+        return "scissor"
+    if record["alpha"] < 0.999:
+        return "alpha"
+    return None
+
+
+def resolve_materials(context, warnings):
+    """Map every imported material to a canonical record. Makes no changes to the scene."""
+    context = context or {}
+    resolved = {}
+    for material in bpy.data.materials:
+        info = describe_material(material)
+        references = dict(info["references"])
+        # A mask is nearly always the very file the material is coloured with, so resolving
+        # it a second time would only repeat the work and any warning that came with it.
+        mask_is_albedo = references["alpha"] and references["alpha"] == references["albedo"]
+        if mask_is_albedo:
+            references["alpha"] = None
+        channels = {channel: resolve_texture(reference, context, warnings, channel)
+                    for channel, reference in references.items()}
+        if mask_is_albedo:
+            channels["alpha"] = channels["albedo"]
+        record = {key: info[key] for key in
+                  ("source", "color", "alpha", "emission_color", "emission_strength",
+                   "roughness", "metallic", "normal_strength")}
+        record["channels"] = {name: found for name, found in channels.items() if found}
+        # glTF hangs coverage on the base colour texture, so a material that binds only a
+        # mask has nowhere to put it. The mask becomes its colour as well, which is what the
+        # eleven Military chain-link fences built this way were always going to look like.
+        if record["channels"].get("alpha") and not record["channels"].get("albedo"):
+            record["channels"]["albedo"] = record["channels"]["alpha"]
+        record["transparency"] = transparency_of(record)
+        record["name"] = canonical_name(record)
+        resolved[material.name] = record
+    return resolved
+
+
+def texture_image(path, colorspace, cache):
+    """Load a texture once per colour space it is needed in.
+
+    A mask bound as both colour and coverage has to exist twice, since a normal or alpha map
+    is data and the same file read as colour is not.
+    """
+    key = (path, colorspace)
+    if key not in cache:
+        image = bpy.data.images.load(path, check_existing=True)
+        if image.colorspace_settings.name != colorspace:
+            image = image.copy() if image.users else image
+            image.colorspace_settings.name = colorspace
+        cache[key] = image
+    return cache[key]
+
+
+def build_material(name, record, cache, warnings):
+    """Rebuild a material with every channel the FBX declared, on the shipped textures."""
     material = bpy.data.materials.new(name)
     material.use_nodes = True
-    bsdf = material.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = (*color, 1.0)
-    bsdf.inputs["Alpha"].default_value = alpha
-    if texture_path:
-        node = material.node_tree.nodes.new("ShaderNodeTexImage")
-        node.image = bpy.data.images.load(texture_path, check_existing=True)
-        material.node_tree.links.new(bsdf.inputs["Base Color"], node.outputs["Color"])
-        if transparency == "scissor":
-            material.node_tree.links.new(bsdf.inputs["Alpha"], node.outputs["Alpha"])
-    if transparency:
+    tree = material.node_tree
+    bsdf = tree.nodes["Principled BSDF"]
+    channels = record["channels"]
+    albedo = (channels.get("albedo") or {}).get("texture")
+    mask = (channels.get("alpha") or {}).get("texture")
+    emission = (channels.get("emission") or {}).get("texture")
+    normal = (channels.get("normal") or {}).get("texture")
+
+    # Maya ignores a material's own colour once a file is connected over it, so a value only
+    # applies where no map does.
+    bsdf.inputs["Base Color"].default_value = (1.0, 1.0, 1.0, 1.0) if albedo else (*record["color"], 1.0)
+    bsdf.inputs["Alpha"].default_value = record["alpha"]
+    bsdf.inputs["Roughness"].default_value = record["roughness"]
+    bsdf.inputs["Metallic"].default_value = record["metallic"]
+    if "Emission Color" in bsdf.inputs:
+        bsdf.inputs["Emission Color"].default_value = ((1.0, 1.0, 1.0, 1.0) if emission
+                                                       else (*record["emission_color"], 1.0))
+        bsdf.inputs["Emission Strength"].default_value = record["emission_strength"]
+
+    base_node = None
+    if albedo:
+        base_node = tree.nodes.new("ShaderNodeTexImage")
+        base_node.image = texture_image(albedo, "sRGB", cache)
+        tree.links.new(bsdf.inputs["Base Color"], base_node.outputs["Color"])
+    # glTF carries coverage on the base colour texture's alpha channel rather than in a map
+    # of its own, so a mask can only be applied where it is that same texture.
+    if mask and base_node is not None:
+        if mask != albedo:
+            warnings.append(f"'{name}' masks with a different file than it colours with, "
+                            f"which glTF cannot express; left opaque")
+        elif base_node.image.channels < 4 or base_node.image.depth in {24, 8}:
+            warnings.append(f"'{name}' binds '{os.path.basename(mask)}' as a mask but the file "
+                            f"has no alpha channel; left opaque")
+        else:
+            # glTF has no cutout flag. The exporter reads alphaMode MASK off a threshold in
+            # front of the Alpha socket, which is what an engine then loads as alpha scissor.
+            clip = tree.nodes.new("ShaderNodeMath")
+            clip.operation = "GREATER_THAN"
+            clip.inputs[1].default_value = ALPHA_CUTOFF
+            tree.links.new(clip.inputs[0], base_node.outputs["Alpha"])
+            tree.links.new(bsdf.inputs["Alpha"], clip.outputs["Value"])
+    if emission:
+        node = tree.nodes.new("ShaderNodeTexImage")
+        node.image = texture_image(emission, "sRGB", cache)
+        tree.links.new(bsdf.inputs["Emission Color"], node.outputs["Color"])
+    if normal:
+        node = tree.nodes.new("ShaderNodeTexImage")
+        node.image = texture_image(normal, "Non-Color", cache)
+        mapping = tree.nodes.new("ShaderNodeNormalMap")
+        mapping.inputs["Strength"].default_value = record["normal_strength"]
+        tree.links.new(mapping.inputs["Color"], node.outputs["Color"])
+        tree.links.new(bsdf.inputs["Normal"], mapping.outputs["Normal"])
+    if record["transparency"]:
+        # Only reaches Blender's own viewport; the exporter reads alpha off the nodes.
         try:
             material.blend_method = "BLEND"
         except (AttributeError, TypeError):
             pass
     return material
-
-
-def resolve_materials(context, warnings):
-    """Map every imported material to a canonical record. Makes no changes to the scene."""
-    textures = context.get("textures", []) if context else []
-    overrides = context.get("overrides", {}) if context else {}
-    foreign = context.get("foreign", {}) if context else {}
-    source_root = context.get("source_root", "") if context else ""
-    output_root = context.get("output_root", "") if context else ""
-
-    resolved = {}
-    for material in bpy.data.materials:
-        info = describe_material(material)
-        match = texture_matching.resolve(info["reference"], textures, overrides, foreign) if info["reference"] else None
-        source_texture = match.path if match else None
-        texture_path = None
-        if match:
-            # Point at the mirrored copy in the output tree, not the source pack.
-            relative = os.path.relpath(match.path, source_root)
-            candidate = os.path.join(output_root, relative)
-            if os.path.exists(candidate):
-                texture_path = candidate
-            elif output_root and os.path.isdir(output_root):
-                # Absent output pack means this is a scan, not a conversion.
-                if relative.startswith(os.pardir):
-                    # An override reached into a pack that has not been converted, so the
-                    # mirrored texture it points at does not exist yet.
-                    warnings.append(f"cross-pack texture needs its pack converted too: "
-                                    f"{os.path.normpath(relative)}")
-                else:
-                    warnings.append(f"texture not mirrored yet: {relative}")
-        elif info["reference"]:
-            warnings.append(f"unresolved texture reference '{info['reference']}'")
-        stem = os.path.splitext(os.path.basename(source_texture))[0] if source_texture else ""
-        transparency = None
-        if source_texture and "alpha" in stem.lower():
-            transparency = "scissor"
-        elif info["alpha"] < 0.999:
-            transparency = "alpha"
-        resolved[material.name] = {
-            "name": canonical_name(info["source"], source_texture, info["reference"]),
-            "texture": texture_path,
-            "texture_source": source_texture,
-            "color": info["color"],
-            "alpha": info["alpha"],
-            "transparency": transparency,
-            "source": info["source"],
-            "reference": info["reference"],
-            "method": match.method if match else None,
-            "score": match.score if match else None,
-        }
-    return resolved
 
 
 def distinct_materials(resolved):
@@ -446,8 +657,8 @@ def rebuild_materials(context, warnings):
     records = {entry["name"]: entry for entry in distinct_materials(resolved)}
 
     strip_materials()
-    created = {name: build_material(name, entry["texture"], entry["color"], entry["alpha"],
-                                    entry["transparency"])
+    cache = {}
+    created = {name: build_material(name, entry, cache, warnings)
                for name, entry in records.items()}
     for mesh, names, indices in plan:
         mesh.materials.clear()
@@ -628,6 +839,11 @@ def convert(job, options, packs):
         export_options["export_materials"] = "EXPORT"
         export_options["export_image_format"] = "AUTO"
         export_options["export_keep_originals"] = True
+        # A normal map is meaningless without a tangent basis. glTF lets a loader generate
+        # one, but shipping it keeps the handful of models that carry normals right in any
+        # engine, and costs nothing on the thousands that do not.
+        if any("normal" in record["channels"] for record in materials):
+            export_options["export_tangents"] = True
     bpy.ops.export_scene.gltf(filepath=dst, **export_options)
     if external:
         externalize_images(dst, warnings)
