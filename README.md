@@ -19,6 +19,7 @@ blender_convert.py     runs inside Blender             (used by the converter)
 split_character_head.py splits character heads         (used by blender_convert.py)
 texture_overrides.json manual texture mappings
 scale_overrides.json   unit corrections for packs that declare the wrong one
+foliage_overrides.json textures for foliage whose FBX names none at all
 
 tools/                 Godot side scripts, copied into your project as <project>/tools/
 synty_packs_fbx/       put the packs here
@@ -36,6 +37,7 @@ Synty FBX do not import cleanly into Godot on their own. The converter deals wit
 - **Duplicated textures.** Synty FBX embed their atlas, so a naive conversion copies a 2048x2048 PNG into every model. The converter references one shared file instead.
 - **Authoring leftovers.** Some models carry a single-key `Take 001` that only restates the import transform, or an Unreal `UCX_` collision hull. Both are dropped. Left in, the take blocks normalization and then reapplies in Godot the very transform normalization exists to remove, and the hull arrives as a visible untextured box over the prop it was meant to bound.
 - **Stacked LOD levels.** The Nature Biomes packs ship each tree and bush as a chain of progressively cheaper meshes, which Godot has no way to read as a chain and therefore renders all at once. Only the finest level is kept; see [LOD chains](#lod-chains).
+- **Card foliage that names no texture.** The same packs export their detailed trees and bushes with the material bindings stripped, leaving one grey Lambert over trunk and canopy alike. Since Synty foliage is alpha cards, that arrives as a white tree with solid quads where the leaves should be. The converter separates the two and binds both; see [Foliage that names no texture](#foliage-that-names-no-texture).
 - **Size.** 1039 models across two packs go from 528.7 MB to 152.9 MB, a 71.1% reduction.
 
 ## Requirements
@@ -330,17 +332,39 @@ What is deliberately **not** mapped is anything ambiguous. `Wall_01.psd` in Fant
 
 ### Materials that name no texture at all
 
-An unresolved reference is one the matcher could not place. A material can also arrive naming nothing whatever, which the scan counts separately, as `untextured`:
+An unresolved reference is one the matcher could not place. A material can also arrive naming nothing whatever, which the scan counts separately, as `untextured`. `texture_overrides.json` cannot reach those, since it is keyed on the texture stem the FBX asks for and there is no stem to key on.
+
+Most are untextured because they were never meant to be textured: glass, water planes, fog rings, sky domes. Foliage is the exception, and it has a file of its own; see below.
+
+## Foliage that names no texture
+
+Synty's Nature Biomes packs export their detailed trees and bushes with the material bindings stripped. One grey Lambert covers the whole model, and because that foliage is built from alpha cutout cards, each quad drawing a leaf texture across the whole of UV space, an untextured card has no coverage to cut with. The model arrives white with solid quads where its leaves should be, which is a good deal more broken looking than merely grey.
+
+The two halves cannot share a material. A leaf card spans the whole of UV space and the trunk's own UVs sit underneath, so no single image can serve both. They separate cleanly by geometry though: a leaf card is one quad, while a trunk is a single island of hundreds of triangles. The converter splits on island size and binds each half from `foliage_overrides.json`:
+
+```json
+{
+  "POLYGON_NatureBiomes_MeadowForest_SourceFiles_v2": {
+    "SM_Env_Tree_Birch_*": {
+      "trunk": "Textures/Plants/Birch_Trunk_Texture.png",
+      "canopy": "Textures/Plants/leafPatch_01.tga",
+      "branches": "Textures/Plants/Branches_02.tga"
+    }
+  }
+}
+```
+
+`canopy` is the leaf cards, bound as a cutout. `trunk` is the woody geometry they hang off, bound opaque. `branches` is a separate twig mesh, where a model has one. Values are path suffixes matched against the pack's shipped textures, exactly as in `texture_overrides.json`, and the first matching glob wins, so put the specific patterns first. A model that names only a `canopy` is not split at all, which is what the pure card bushes want.
 
 ```
-POLYGON_NatureBiomes_MeadowForest_SourceFiles_v2: 17 materials  (5 exact, 4 override, 0 heuristic, 7 unresolved, 1 untextured)
+Foliage   bound 39 mesh(es) across 25 model(s) whose FBX named no texture
 ```
 
-`texture_overrides.json` cannot reach these. It is keyed on the texture stem the FBX asks for, and there is no stem to key on. Across the packs here that is 30 materials on 410 meshes.
+The file ships mappings for 23 models across MeadowForest and TropicalJungle: the birch, fruit and meadow trees, the forest and pohutukawa trees, and the bushes that go with them.
 
-Most of them are untextured because they were never meant to be textured: glass, water planes, fog rings, sky domes. **The trees and bushes are the exception worth knowing about.** Every one in the Nature and Nature Biomes packs carries a single grey Lambert covering trunk, canopy and imposter alike, and the Nature pack's carry flat placeholder colours instead, which is where names like `Trunk_FF0000` and `Leave_34FF00` come from. The packs do ship the textures those stand for, under `Textures/Plants` and `Textures/Leaves`, but nothing in the FBX records which belongs to which model. That mapping lived in Unity materials, which the source packs do not include, so it is not something the converter can recover.
+**How the mappings were arrived at**, since guessing a texture is otherwise exactly what this tool refuses to do. Each pack ships a `Textures/LOD_Cards` image per tree, which is a baked render of the finished model and therefore a picture of the answer. Every candidate leaf map was scored against its card's palette, and the method reproduces the two mappings that were already known independently: `leafPatch_01` for the birches, and `pohutukawaLeaf` for the pohutukawas, which is also an exact name match. Trunks were confirmed by sampling each candidate at the trunk's own UV coordinates: on these models a trunk collapses to a single point of the pack atlas, holding the bark colour it was authored with. The birches are the exception, their trunks spanning a whole dedicated bark map.
 
-Synty foliage is built from alpha cutout cards, each quad drawing one leaf texture across the whole of UV space. An untextured card therefore has no coverage to cut with and renders as a solid quad rather than a leaf, which is what makes an untextured tree look broken rather than merely grey. Assign those materials by hand in Godot.
+Two things are deliberately left alone. **Palms, bananas, cacti and succulents** in these packs are not card foliage at all but solid geometry wearing a dedicated full-UV texture, so they are a different problem and stay untextured. And in the base **Nature** pack, `Trunk_FF0000` and `Leave_34FF00` are already separate materials on separate surfaces, so those models need no splitting and are better fixed by hand in Godot, or by keying an override on the material name, which this file does not yet do.
 
 ## Fixing a pack that converts too small
 
@@ -444,8 +468,8 @@ Expected for small static props. See [Size expectations](docs/DESIGN.md#size-exp
 **A whole pack arrives tiny in Godot**
 Its FBX declare a unit the geometry is not in. See [Fixing a pack that converts too small](#fixing-a-pack-that-converts-too-small).
 
-**A tree or bush is white, with flat quads sticking out of it**
-Its FBX binds no texture, so the alpha cutout that shapes each leaf card has nothing to cut with. See [Materials that name no texture at all](#materials-that-name-no-texture-at-all). Quads spanning the whole canopy are a separate thing, the LOD imposter, and mean the model was converted with `--lods keep`.
+**A tree or bush is white, with flat quads where its leaves should be**
+Its FBX binds no texture, so the alpha cutout that shapes each leaf card has nothing to cut with. Add it to [foliage_overrides.json](#foliage-that-names-no-texture) and reconvert with `--force`. Quads spanning the whole canopy are a separate thing, the LOD imposter, and mean the model was converted with `--lods keep`.
 
 **Godot is importing my source FBX**
 Keep `synty_packs_fbx/` outside your Godot project, or drop an empty `.gdignore` file in it.

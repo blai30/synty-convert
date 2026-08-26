@@ -16,6 +16,7 @@ flagged ``split`` also have any character head separated onto its own node first
 from __future__ import annotations
 
 import collections
+import fnmatch
 import json
 import math
 import os
@@ -26,6 +27,7 @@ import time
 import traceback
 import urllib.parse
 
+import bmesh
 import bpy
 import numpy
 from mathutils import Matrix
@@ -61,6 +63,14 @@ ALPHA_CUTOFF = 0.5
 # How Synty names a level of a foliage LOD chain: SM_Env_Tree_Meadow_01_LOD0 through _LOD3,
 # with a model's trunk and its canopy each carrying their own chain.
 LOD_SUFFIX = re.compile(r"^(?P<base>.+)_LOD(?P<level>\d+)$", re.IGNORECASE)
+
+# Largest island, in triangles, still counted as a leaf card rather than woody geometry.
+# Synty's foliage cards are single quads; the trunks and branches they hang off run to
+# hundreds of triangles, so anything in between separates the two cleanly.
+LEAF_MAX_TRIS = 8
+
+# A mesh holding a model's twigs rather than its trunk and canopy, which needs no splitting.
+BRANCH_MESH = "Branches"
 
 FBX_IMPORT_OPTIONS = {
     "use_anim": True,
@@ -770,6 +780,138 @@ def drop_extra_lods():
     return dropped
 
 
+def island_triangles(mesh):
+    """Triangle count of the connected island each polygon belongs to.
+
+    Coincident vertices are welded first. Nothing here has been through glTF yet, but Maya
+    leaves a trunk built from separately modelled sections meeting at unmerged vertices,
+    which would otherwise read as dozens of islands instead of one.
+    """
+    working = bmesh.new()
+    working.from_mesh(mesh)
+    working.faces.ensure_lookup_table()
+    # Welding can drop a face that collapses, which would renumber everything after it.
+    # Carrying each face's own index through the op keeps the answer keyed to the mesh
+    # this was asked about rather than to whatever bmesh is left holding.
+    origin = working.faces.layers.int.new("origin")
+    for face in working.faces:
+        face[origin] = face.index
+    bmesh.ops.remove_doubles(working, verts=working.verts, dist=1e-4)
+    working.faces.ensure_lookup_table()
+
+    sizes = {}
+    seen = set()
+    for face in working.faces:
+        if face.index in seen:
+            continue
+        stack, island = [face], []
+        seen.add(face.index)
+        while stack:
+            current = stack.pop()
+            island.append(current)
+            for edge in current.edges:
+                for neighbour in edge.link_faces:
+                    if neighbour.index not in seen:
+                        seen.add(neighbour.index)
+                        stack.append(neighbour)
+        total = sum(len(polygon.verts) - 2 for polygon in island)
+        for polygon in island:
+            sizes[polygon[origin]] = total
+    working.free()
+    return sizes
+
+
+def foliage_parts(context, source):
+    """The parts a pack names for this model, or None when it names none."""
+    stem = os.path.splitext(os.path.basename(source))[0]
+    for pattern, parts in (context.get("foliage") or {}).items():
+        if fnmatch.fnmatch(stem, pattern):
+            return parts
+    return None
+
+
+def foliage_texture(suffix, context, warnings):
+    """The shipped texture a foliage override names, matched as a path suffix."""
+    wanted = suffix.replace("\\", "/")
+    for path in context.get("textures", []):
+        if path.replace("\\", "/").endswith(wanted):
+            return path
+    warnings.append(f"foliage texture not found in pack: {suffix}")
+    return None
+
+
+def foliage_material(name, path, cutout):
+    """Stand in for the texture binding the FBX was exported without.
+
+    Built as an imported material would have arrived rather than as a finished one, so that
+    everything downstream, resolution and naming and the manifest, treats it as a material
+    that named a file all along.
+    """
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    bsdf = material.node_tree.nodes["Principled BSDF"]
+    # Blender's own defaults for a new node are not the importer's: it starts a material at
+    # roughness 0.5 and emission white, which would qualify every one of these names with an
+    # R50 and an EmissiveFFFFFF and light them up in the generated .tres. What the FBX would
+    # have declared is a plain material, so say that.
+    bsdf.inputs["Roughness"].default_value = DEFAULT_ROUGHNESS
+    bsdf.inputs["Metallic"].default_value = 0.0
+    if "Emission Color" in bsdf.inputs:
+        bsdf.inputs["Emission Color"].default_value = (0.0, 0.0, 0.0, 1.0)
+    texture = material.node_tree.nodes.new("ShaderNodeTexImage")
+    texture.image = bpy.data.images.load(path, check_existing=True)
+    material.node_tree.links.new(bsdf.inputs["Base Color"], texture.outputs["Color"])
+    if cutout:
+        # Coverage rides on the same file, which is what a Synty foliage card always does
+        # and what lets the material come out as a cutout rather than an opaque quad.
+        material.node_tree.links.new(bsdf.inputs["Alpha"], texture.outputs["Alpha"])
+    return material
+
+
+def apply_foliage_textures(context, source, warnings):
+    """Bind the textures a foliage model's FBX declares nothing for, splitting where needed.
+
+    Synty's Nature Biomes foliage exports with its material bindings stripped: one grey
+    Lambert covers trunk and canopy alike, and since every leaf card maps the whole of UV
+    space, the trunk's own UVs sit underneath them and no single image can serve both. The
+    parts are separable by geometry though. A leaf card is one quad; a trunk is a single
+    island of hundreds of triangles, so splitting on island size recovers the two materials
+    the model was authored with. See ``foliage_overrides.json`` for what each model gets.
+    """
+    parts = foliage_parts(context, source)
+    if not parts:
+        return 0
+    resolved = {part: foliage_texture(suffix, context, warnings)
+                for part, suffix in parts.items()}
+    touched = 0
+    for obj in [o for o in bpy.data.objects if o.type == "MESH"]:
+        if BRANCH_MESH in obj.name:
+            if resolved.get("branches"):
+                obj.data.materials.clear()
+                obj.data.materials.append(foliage_material("Branches", resolved["branches"], True))
+                touched += 1
+            continue
+        if not resolved.get("canopy"):
+            continue
+        sizes = island_triangles(obj.data)
+        woody = [polygon.index for polygon in obj.data.polygons
+                 if sizes.get(polygon.index, 0) > LEAF_MAX_TRIS]
+        obj.data.materials.clear()
+        # Canopy first, so a model with no woody geometry needs no second slot at all.
+        obj.data.materials.append(foliage_material("Canopy", resolved["canopy"], True))
+        if woody and resolved.get("trunk"):
+            obj.data.materials.append(foliage_material("Trunk", resolved["trunk"], False))
+            for index in woody:
+                obj.data.polygons[index].material_index = 1
+        touched += 1
+    # The Lambert that carried no texture is what these replaced, so leaving it behind would
+    # put a material no mesh wears into the manifest, still reported as unresolved.
+    for material in list(bpy.data.materials):
+        if material.users == 0:
+            bpy.data.materials.remove(material)
+    return touched
+
+
 def drop_vertex_colors():
     for mesh in bpy.data.meshes:
         for attribute in list(mesh.color_attributes):
@@ -845,7 +987,10 @@ def convert(job, options, packs):
     bpy.ops.import_scene.fbx(filepath=src, **import_options)
 
     if options.get("scan_only"):
-        # Report what the materials resolve to without touching the scene or writing output.
+        # Report what the materials resolve to without writing output. Foliage bindings are
+        # applied first even though nothing is written, or the scan would report a tree as
+        # untextured that a conversion of the same pack textures perfectly well.
+        apply_foliage_textures(packs.get(job.get("pack"), {}), src, warnings)
         resolved = resolve_materials(packs.get(job.get("pack"), {}), warnings)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "src_bytes": os.path.getsize(src),
                 "dst_bytes": 0, "materials": distinct_materials(resolved), "warnings": warnings,
@@ -859,6 +1004,8 @@ def convert(job, options, packs):
     # Ahead of everything downstream, so the two halves are normalized, materialized and
     # exported as ordinary meshes rather than needing a second pass over the finished GLB.
     split = split_character_head.split_scene(warnings) if job.get("split") else []
+    # Ahead of material resolution, which is what turns these bindings into real materials.
+    foliage = apply_foliage_textures(packs.get(job.get("pack"), {}), src, warnings) if external else 0
     materials = rebuild_materials(packs.get(job.get("pack"), {}), warnings) if external else []
     if not external:
         strip_materials()
@@ -902,6 +1049,7 @@ def convert(job, options, packs):
         "materials": materials,
         "split": split,
         "dropped_lods": dropped_lods,
+        "foliage": foliage,
         "warnings": warnings,
     }
 

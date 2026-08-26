@@ -32,6 +32,7 @@ RESULT_PREFIX = "@@RESULT "
 WORKER_SCRIPT = Path(__file__).with_name("blender_convert.py")
 OVERRIDES_FILE = Path(__file__).with_name("texture_overrides.json")
 SCALES_FILE = Path(__file__).with_name("scale_overrides.json")
+FOLIAGE_FILE = Path(__file__).with_name("foliage_overrides.json")
 
 # Compared against a pack's median model, never an individual one. Synty ships plenty of
 # coins and gems under 10 cm, but a pack whose typical model is that small has had a unit
@@ -73,6 +74,7 @@ class Totals:
     materials: dict = field(default_factory=dict)
     split: dict = field(default_factory=dict)
     lods: dict = field(default_factory=dict)
+    foliage: dict = field(default_factory=dict)
     spans: dict = field(default_factory=lambda: collections.defaultdict(list))
 
 
@@ -150,6 +152,9 @@ def pack_contexts(packs, source_root, output_root):
     overrides = {}
     if OVERRIDES_FILE.exists():
         overrides = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
+    foliage = {}
+    if FOLIAGE_FILE.exists():
+        foliage = json.loads(FOLIAGE_FILE.read_text(encoding="utf-8"))
     indexes = {}
 
     def index(pack):
@@ -173,6 +178,7 @@ def pack_contexts(packs, source_root, output_root):
             "textures": index(pack),
             "overrides": entries,
             "foreign": foreign,
+            "foliage": {k: v for k, v in foliage.get(pack, {}).items() if not k.startswith("_")},
         }
     return contexts
 
@@ -246,6 +252,8 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             totals.split[result["src"]] = result["split"]
         if result.get("dropped_lods"):
             totals.lods[result["src"]] = result["dropped_lods"]
+        if result.get("foliage"):
+            totals.foliage[result["src"]] = result["foliage"]
         bounds = (result.get("summary") or {}).get("bounds")
         if bounds:
             totals.spans[result.get("pack", "")].append(max(bounds[i + 3] - bounds[i] for i in range(3)))
@@ -419,6 +427,9 @@ def report(totals, elapsed):
     if totals.lods:
         print(f"LODs      dropped {sum(totals.lods.values())} coarse level(s) from "
               f"{len(totals.lods)} model(s)")
+    if totals.foliage:
+        print(f"Foliage   bound {sum(totals.foliage.values())} mesh(es) across "
+              f"{len(totals.foliage)} model(s) whose FBX named no texture")
     if totals.converted:
         saved = totals.src_bytes - totals.dst_bytes
         ratio = 100.0 * saved / max(totals.src_bytes, 1)
