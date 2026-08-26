@@ -35,6 +35,7 @@ Synty FBX do not import cleanly into Godot on their own. The converter deals wit
 - **Dropped material channels.** A handful of Synty materials carry an emissive map, a normal map or a transparency mask alongside their atlas. The converter carries every channel the FBX declares across to the GLB; see [What the materials carry](#what-the-materials-carry).
 - **Duplicated textures.** Synty FBX embed their atlas, so a naive conversion copies a 2048x2048 PNG into every model. The converter references one shared file instead.
 - **Authoring leftovers.** Some models carry a single-key `Take 001` that only restates the import transform, or an Unreal `UCX_` collision hull. Both are dropped. Left in, the take blocks normalization and then reapplies in Godot the very transform normalization exists to remove, and the hull arrives as a visible untextured box over the prop it was meant to bound.
+- **Stacked LOD levels.** The Nature Biomes packs ship each tree and bush as a chain of progressively cheaper meshes, which Godot has no way to read as a chain and therefore renders all at once. Only the finest level is kept; see [LOD chains](#lod-chains).
 - **Size.** 1039 models across two packs go from 528.7 MB to 152.9 MB, a 71.1% reduction.
 
 ## Requirements
@@ -269,6 +270,31 @@ Two limits are worth stating. glTF carries coverage on the base colour texture's
 
 Godot imports a normal map correctly on its own, but check the texture's **Import** dock shows **Normal Map** under compression if a surface looks flat.
 
+## LOD chains
+
+Three of Synty's Nature Biomes packs ship each tree and bush as a chain of progressively cheaper meshes, sitting side by side under one root, with a model's trunk and its canopy each carrying a chain of their own:
+
+```
+SM_Env_Tree_Meadow_01
+  SM_Env_Tree_Meadow_01_Branches_LOD0     3,116 tris
+  SM_Env_Tree_Meadow_01_Branches_LOD1
+  SM_Env_Tree_Meadow_01_Branches_LOD2
+  SM_Env_Tree_Meadow_01_LOD0             22,162 tris
+  SM_Env_Tree_Meadow_01_LOD1
+  SM_Env_Tree_Meadow_01_LOD2
+  SM_Env_Tree_Meadow_01_LOD3                 12 tris, a flat billboard imposter
+```
+
+Nothing downstream reads that as a chain. Unity and Unreal understand an FBX LOD group; Godot has no such concept, takes no meaning from the naming, and does not implement the `MSFT_lod` glTF extension. Every level therefore arrives as an ordinary `MeshInstance3D` and all of them render together, so the tree costs several times what it should and the imposter card stands crossed through the middle of the tree it exists to stand in for. Godot's other LOD mechanism, `visibility_range_begin` and `visibility_range_end`, is a property of the node and cannot be carried in a GLB at all.
+
+So the converter keeps the finest level of each chain and drops the rest, which is what Godot wants anyway: its glTF importer has LOD generation on by default and builds a chain out of whatever it is handed. Across the three packs that is 255 meshes dropped from 132 models.
+
+```
+LODs      dropped 255 coarse level(s) from 132 model(s)
+```
+
+`--lods keep` ships the whole chain instead. It is worth taking if you intend to wire the visibility ranges up by hand, because meshoptimizer's simplification is weaker than an artist's LODs on alpha cutout foliage and the billboard is cheaper at distance than anything generated from the full mesh.
+
 ## Fixing unresolved textures
 
 Synty's FBX reference authoring files that never shipped, so some references cannot be matched. When that happens the material keeps its colour and is reported.
@@ -301,6 +327,20 @@ That other pack has to be converted too, since the material points at its mirror
 The file ships with 48 mappings covering 14 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. A working file's name is not evidence of what it holds: `RopeBridge.png` is the atlas for 45 Meadow Forest props, none of which is a rope bridge, because the artist named the file in the Tropical Jungle scene that does have one. If you own a pack that is not listed, run `--scan-materials` and add what you find.
 
 What is deliberately **not** mapped is anything ambiguous. `Wall_01.psd` in FantasyKingdom could be any of five shipped wall textures, and references to packs you do not own, like `PolygonAncientWorlds_Texture_01.png`, have no counterpart to find. Guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one, so those stay colour-only and stay in the report.
+
+### Materials that name no texture at all
+
+An unresolved reference is one the matcher could not place. A material can also arrive naming nothing whatever, which the scan counts separately, as `untextured`:
+
+```
+POLYGON_NatureBiomes_MeadowForest_SourceFiles_v2: 17 materials  (5 exact, 4 override, 0 heuristic, 7 unresolved, 1 untextured)
+```
+
+`texture_overrides.json` cannot reach these. It is keyed on the texture stem the FBX asks for, and there is no stem to key on. Across the packs here that is 30 materials on 410 meshes.
+
+Most of them are untextured because they were never meant to be textured: glass, water planes, fog rings, sky domes. **The trees and bushes are the exception worth knowing about.** Every one in the Nature and Nature Biomes packs carries a single grey Lambert covering trunk, canopy and imposter alike, and the Nature pack's carry flat placeholder colours instead, which is where names like `Trunk_FF0000` and `Leave_34FF00` come from. The packs do ship the textures those stand for, under `Textures/Plants` and `Textures/Leaves`, but nothing in the FBX records which belongs to which model. That mapping lived in Unity materials, which the source packs do not include, so it is not something the converter can recover.
+
+Synty foliage is built from alpha cutout cards, each quad drawing one leaf texture across the whole of UV space. An untextured card therefore has no coverage to cut with and renders as a solid quad rather than a leaf, which is what makes an untextured tree look broken rather than merely grey. Assign those materials by hand in Godot.
 
 ## Fixing a pack that converts too small
 
@@ -370,6 +410,7 @@ godot --headless --script res://tools/verify_import.gd -- --assets res://assets
 | `--verify`         | off                | Reimport each GLB and check bounds, bone and action parity    |
 | `--vertex-colors`  | `drop`             | `keep` retains colour attributes                              |
 | `--animations`     | `keep`             | `drop` discards baked-in takes                                |
+| `--lods`           | `drop`             | `keep` ships every LOD level, which renders them all at once  |
 | `-j`, `--workers`  | half the CPU cores | Concurrent Blender processes                                  |
 | `--dry-run`        | off                | List what would happen and exit                               |
 | `--quiet`          | off                | Only print the final summary                                  |
@@ -402,6 +443,9 @@ Expected for small static props. See [Size expectations](docs/DESIGN.md#size-exp
 
 **A whole pack arrives tiny in Godot**
 Its FBX declare a unit the geometry is not in. See [Fixing a pack that converts too small](#fixing-a-pack-that-converts-too-small).
+
+**A tree or bush is white, with flat quads sticking out of it**
+Its FBX binds no texture, so the alpha cutout that shapes each leaf card has nothing to cut with. See [Materials that name no texture at all](#materials-that-name-no-texture-at-all). Quads spanning the whole canopy are a separate thing, the LOD imposter, and mean the model was converted with `--lods keep`.
 
 **Godot is importing my source FBX**
 Keep `synty_packs_fbx/` outside your Godot project, or drop an empty `.gdignore` file in it.

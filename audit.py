@@ -12,6 +12,7 @@ import argparse
 import collections
 import json
 import os
+import re
 import struct
 import sys
 import urllib.parse
@@ -19,6 +20,10 @@ from pathlib import Path
 
 GLB_MAGIC = 0x46546C67
 CHUNK_JSON = 0x4E4F534A
+
+# A level of a vendor LOD chain. Every level ships as an ordinary mesh, so a model that
+# still holds more than one of them renders all of them at once.
+LOD_SUFFIX = re.compile(r"^(?P<base>.+)_LOD(?P<level>\d+)$", re.IGNORECASE)
 
 
 def gltf_of(path):
@@ -62,6 +67,15 @@ def audit_models(root, failures, stats):
                 failures["image uri does not resolve"].append(f"{path} -> {uri}")
             else:
                 stats["textures"].add(str(target))
+
+        chains = collections.defaultdict(set)
+        for node in gltf.get("nodes", []):
+            match = LOD_SUFFIX.match(node.get("name") or "")
+            if match and node.get("mesh") is not None:
+                chains[match.group("base")].add(int(match.group("level")))
+        if any(len(levels) > 1 for levels in chains.values()):
+            # Not a failure: --lods keep asks for this deliberately.
+            stats["models_with_stacked_lods"] += 1
 
         for mesh in gltf.get("meshes", []):
             for primitive in mesh["primitives"]:
@@ -142,6 +156,9 @@ def main():
         print(f"extra maps: {stats['emission_texture']} emission, {stats['normal_texture']} normal")
     if stats["primitives_without_material"]:
         print(f"primitives with no material: {stats['primitives_without_material']}")
+    if stats["models_with_stacked_lods"]:
+        print(f"models shipping a whole LOD chain: {stats['models_with_stacked_lods']} "
+              f"(every level renders at once; converted with --lods keep)")
 
     if not failures:
         print("\nPASS: no embedded images, every uri resolves, roots identity, UVs intact")

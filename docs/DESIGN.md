@@ -163,6 +163,8 @@ Scanned across all 11 packs, 6374 files. The dominant atlas resolves in every pa
 
 **Bone handling.** `ignore_leaf_bones=True` drops the tip bones Blender's importer synthesises. `automatic_bone_orientation=False` preserves the source bone axes, so rigs stay consistent between a character pack and an animation pack. All bones are exported, including unweighted attachment bones.
 
+**Only the finest LOD level ships.** Synty's Nature Biomes foliage carries its LOD chain as sibling meshes named `_LOD0` through `_LOD3`. Nothing downstream reads that as a chain: Godot has no LOD group, takes no meaning from node names, and does not implement `MSFT_lod`, so every level arrives as an ordinary `MeshInstance3D` and all of them render at once, the coarsest being a billboard imposter crossing the tree it stands in for. The other mechanism, `visibility_range_begin`, is a node property with no glTF representation, so there is nothing to encode either way. Godot's importer generates its own chain from whatever it is handed, which leaves the finest level as the only one worth keeping. The drop happens before the world bounds are sampled, so the invariant across take dropping and normalization still compares the geometry that actually ships, and `--verify` counts meshes against the same scene it exported. `--lods keep` restores the whole chain, for wiring the visibility ranges up by hand.
+
 **Exporter options are filtered against the running Blender build**, so an option disappearing in a future version degrades gracefully instead of raising.
 
 ## Size expectations

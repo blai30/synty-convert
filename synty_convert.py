@@ -72,6 +72,7 @@ class Totals:
     failures: list = field(default_factory=list)
     materials: dict = field(default_factory=dict)
     split: dict = field(default_factory=dict)
+    lods: dict = field(default_factory=dict)
     spans: dict = field(default_factory=lambda: collections.defaultdict(list))
 
 
@@ -243,6 +244,8 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             entry["sources"].add(material["source"])
         if result.get("split"):
             totals.split[result["src"]] = result["split"]
+        if result.get("dropped_lods"):
+            totals.lods[result["src"]] = result["dropped_lods"]
         bounds = (result.get("summary") or {}).get("bounds")
         if bounds:
             totals.spans[result.get("pack", "")].append(max(bounds[i + 3] - bounds[i] for i in range(3)))
@@ -413,6 +416,9 @@ def report(totals, elapsed):
         open_necks = sum(1 for record in records if record.get("open_rings"))
         summary = f"Split     {len(records)} head(s) off {len(totals.split)} character model(s)"
         print(summary + (f", {open_necks} left open at the neck" if open_necks else ""))
+    if totals.lods:
+        print(f"LODs      dropped {sum(totals.lods.values())} coarse level(s) from "
+              f"{len(totals.lods)} model(s)")
     if totals.converted:
         saved = totals.src_bytes - totals.dst_bytes
         ratio = 100.0 * saved / max(totals.src_bytes, 1)
@@ -451,6 +457,9 @@ def main():
                         help="drop vertex colors for barebones meshes, or keep them")
     parser.add_argument("--animations", choices=("keep", "drop"), default="keep",
                         help="drop baked-in takes; useful for model packs whose clips live elsewhere")
+    parser.add_argument("--lods", choices=("drop", "keep"), default="drop",
+                        help="drop every LOD level above the finest, since Godot builds its own "
+                             "chain; 'keep' ships all of them, which renders them all at once")
     parser.add_argument("--materials", choices=("external", "none"), default="external",
                         help="'external' references shared textures by URI and writes Godot manifests; "
                              "'none' strips materials for barebones meshes")
@@ -510,7 +519,7 @@ def main():
     if jobs:
         options = {"verify": args.verify, "vertex_colors": args.vertex_colors,
                    "animations": args.animations, "materials": args.materials,
-                   "scan_only": args.scan_materials}
+                   "lods": args.lods, "scan_only": args.scan_materials}
         convert_all(blender, jobs, options, contexts,
                     max(1, min(args.workers, len(jobs))), totals, args.quiet)
 

@@ -15,6 +15,7 @@ flagged ``split`` also have any character head separated onto its own node first
 
 from __future__ import annotations
 
+import collections
 import json
 import math
 import os
@@ -56,6 +57,10 @@ DEFAULT_ROUGHNESS = round(1.0 - math.sqrt(20.0) / 10.0, 4)
 # Coverage below this is a hole. FBX says only that a mask is bound, never how to apply it;
 # every Synty mask is a cutout, and cutouts sort correctly where blending does not.
 ALPHA_CUTOFF = 0.5
+
+# How Synty names a level of a foliage LOD chain: SM_Env_Tree_Meadow_01_LOD0 through _LOD3,
+# with a model's trunk and its canopy each carrying their own chain.
+LOD_SUFFIX = re.compile(r"^(?P<base>.+)_LOD(?P<level>\d+)$", re.IGNORECASE)
 
 FBX_IMPORT_OPTIONS = {
     "use_anim": True,
@@ -729,6 +734,42 @@ def drop_non_geometry():
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
+def lod_chains():
+    """Mesh objects grouped by the name they share ahead of their ``_LOD`` suffix."""
+    chains = collections.defaultdict(list)
+    for obj in bpy.data.objects:
+        if obj.type != "MESH":
+            continue
+        # Blender disambiguates a name collision with a .001 suffix, which would otherwise
+        # hide the level behind it and leave that whole chain in the export.
+        match = LOD_SUFFIX.match(re.sub(r"\.\d+$", "", obj.name))
+        if match:
+            chains[match.group("base")].append((int(match.group("level")), obj))
+    return chains
+
+
+def drop_extra_lods():
+    """Keep the finest level of every LOD chain and delete the rest.
+
+    Nothing downstream reads these as a chain. Godot has no LOD group, takes no meaning from
+    the naming and does not implement ``MSFT_lod``, so all four levels arrive as ordinary
+    sibling meshes and render at once, the coarsest being a billboard imposter crossing the
+    very tree it exists to stand in for at distance. Godot generates its own chain from
+    whatever it imports, which makes the finest level the only one worth shipping.
+    """
+    dropped = 0
+    for members in lod_chains().values():
+        # Finest first. That is whichever level is lowest rather than zero specifically,
+        # since a pack that starts counting elsewhere still has a finest level.
+        for _, obj in sorted(members, key=lambda member: member[0])[1:]:
+            # Removing a parent would strand its children on a stale parent inverse.
+            if obj.children:
+                continue
+            bpy.data.objects.remove(obj, do_unlink=True)
+            dropped += 1
+    return dropped
+
+
 def drop_vertex_colors():
     for mesh in bpy.data.meshes:
         for attribute in list(mesh.color_attributes):
@@ -813,6 +854,8 @@ def convert(job, options, packs):
     if options.get("vertex_colors") != "keep":
         drop_vertex_colors()
     drop_non_geometry()
+    # Ahead of the bounds invariant below, so what it compares is the geometry that ships.
+    dropped_lods = drop_extra_lods() if options.get("lods", "drop") != "keep" else 0
     # Ahead of everything downstream, so the two halves are normalized, materialized and
     # exported as ordinary meshes rather than needing a second pass over the finished GLB.
     split = split_character_head.split_scene(warnings) if job.get("split") else []
@@ -858,6 +901,7 @@ def convert(job, options, packs):
         "summary": source_summary,
         "materials": materials,
         "split": split,
+        "dropped_lods": dropped_lods,
         "warnings": warnings,
     }
 
