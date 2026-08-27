@@ -1205,7 +1205,10 @@ def main():
             result = convert(job, options, packs)
             result["ok"] = True
         except Exception:
-            result = {"src": job["src"], "dst": job["dst"], "ok": False, "error": traceback.format_exc(limit=3)}
+            # The pack travels with the failure too: a basename alone does not identify a
+            # model, since packs share filenames like SM_Prop_Barrel_01.fbx between them.
+            result = {"src": job["src"], "dst": job["dst"], "pack": job["pack"], "ok": False,
+                      "error": traceback.format_exc(limit=3)}
         result["seconds"] = round(time.monotonic() - started, 3)
         print(RESULT_PREFIX + json.dumps(result), flush=True)
 

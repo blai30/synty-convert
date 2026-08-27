@@ -275,7 +275,8 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             done += 1
             if not result.get("ok"):
                 totals.failed += 1
-                totals.failures.append((result.get("src"), result.get("error", "").strip().splitlines()[-1:]))
+                totals.failures.append((result.get("src"), result.get("pack", ""),
+                                        result.get("error", "").strip().splitlines()[-1:]))
                 print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
                 return
             if options.get("scan_report"):
@@ -601,6 +602,47 @@ def report_scale(totals):
               f"{SCALES_FILE.name}\n  and reconvert with --force.")
 
 
+def failure_reason(src, message):
+    """A worker's error with the model's own path taken back out of it.
+
+    Blender quotes the absolute filename inside several of its import errors. The report
+    line already names the file, so leaving the path in says it twice, and worse, makes one
+    fault hitting twenty models read as twenty distinct faults and defeats grouping them.
+    Only the job's own path is removed, by exact match against strings we already hold,
+    rather than by guessing at the shape of a path with a pattern.
+    """
+    forms = {str(src), str(src).replace("\\", "/"), str(src).replace("/", "\\")}
+    text = " ".join(message)
+    for form in forms | {form.replace("\\", "\\\\") for form in forms}:
+        text = text.replace(form, "")
+    return " ".join(text.split()).strip(" '\"") or "unknown error"
+
+
+def report_failures(totals):
+    """Group every model that did not convert under the reason it did not, as audit.py does.
+
+    Shared by the conversion summary and the scan, which reaches its own exit without ever
+    calling ``report``. A scan that printed a bare "FAILED" per file said neither of the two
+    things needed to act on it: nine packs ship a file called SM_Prop_Barrel_01.fbx, so the
+    basename alone does not identify one, and the reason was discarded entirely. Grouping
+    keeps a fault that hits one model visible beside a fault that hits twenty, which a flat
+    truncated list does not.
+    """
+    if not totals.failures:
+        return
+    grouped = collections.defaultdict(list)
+    for src, pack, message in totals.failures:
+        name = Path(str(src)).name
+        grouped[failure_reason(src, message)].append(f"{pack}/{name}" if pack else name)
+    print(f"\n{len(totals.failures)} failure(s):")
+    for reason, models in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])):
+        print(f"  {reason}: {len(models)}")
+        for model in sorted(models)[:5]:
+            print(f"     {model}")
+        if len(models) > 5:
+            print(f"     ... and {len(models) - 5} more")
+
+
 def report(totals, elapsed):
     print("\n" + "=" * 68)
     print(f"Converted {totals.converted} FBX -> GLB   (failed {totals.failed}, up to date {totals.skipped})")
@@ -637,10 +679,7 @@ def report(totals, elapsed):
         print(f"\n{len(totals.warnings)} warning(s):")
         for warning in totals.warnings[:15]:
             print(f"  {warning}")
-    if totals.failures:
-        print(f"\n{len(totals.failures)} failure(s):")
-        for src, message in totals.failures[:15]:
-            print(f"  {Path(str(src)).name}: {' '.join(message)}")
+    report_failures(totals)
     print("=" * 68)
 
 
@@ -764,8 +803,9 @@ def main():
                 json.dumps({"models": totals.scanned}, indent=2) + "\n", encoding="utf-8")
             print(f"  wrote {args.scan_report} ({len(totals.scanned)} models)")
         report_materials(totals, contexts, judge)
-        print(f"\nScanned {totals.converted} files in {time.monotonic() - started:.1f}s. "
-              f"Nothing was written.")
+        report_failures(totals)
+        print(f"\nScanned {totals.converted} files in {time.monotonic() - started:.1f}s"
+              f"{f', {totals.failed} failed' if totals.failed else ''}. Nothing was written.")
         sys.exit(1 if totals.failed else 0)
 
     report(totals, time.monotonic() - started)

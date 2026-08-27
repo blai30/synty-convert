@@ -334,7 +334,7 @@
     ]
   },
 
-  "POLYGON_Dungeon_Pack_SourceFiles_v2": {
+  "POLYGON_Dungeon_Pack_SourceFiles_v3": {
     "_verification": "SM_Env_Tiles_Texture_01 to _08 all use lambert2 on a small atlas island, 01 sitting at U 0.672 to 0.992 V 0.672 to 0.992. Only _09 and _10 use lambert605, and their UVs cover the whole quad, U 0.003 to 0.997 V 0.003 to 0.997, which means a dedicated full frame texture rather than an atlas lookup. The pack ships exactly two dedicated seamless floor tile sets, four recolours each, and they are numbered _09_ and _10_, matching the two model numbers one to one. The two sets are genuinely different patterns: within set edge correlation is 0.998 to 0.999 and across sets it is 0.19. These are the only bare materials in the pack.",
     "flavors": {
       "FloorTile09": {
@@ -352,7 +352,7 @@
     ]
   },
 
-  "POLYGON_Dungeons_Realms_SourceFiles_v2": {
+  "POLYGON_Dungeons_Realms_SourceFiles_v5": {
     "_verification": "The camp platforms span U 0.036 to 0.373 V 0.277 to 0.380, and SM_Prop_Camp_Stick_01 and SM_Prop_Camp_Wood_Floor_04 both resolve to Dungeons_2_Texture_01_A.png at the single point U 0.373 V 0.380, precisely that box's corner, sampling the same 95,84,71 plank brown. SM_Prop_Barrel_01 sits at U 0.016 to 0.058 V 0.228 to 0.284 next to the resolved SM_Prop_Barrel_02's U 0.014 to 0.082 V 0.277 to 0.330 and samples one of the colours _02 reads. SM_Generic_Tree_01 to _04 ask for Polygon_Kids_Texture_A.png, a pack that is not converted, but their UVs are a thin strip at U 0.038 to 0.146 V 0.277 to 0.280 that samples trunk brown 95,84,71 and foliage green 79,96,54 on this pack's own atlas, with Tree_02 reading pure green. SM_Env_Bush_01's degenerate point reads 59,72,41, dark leaf green. The 21 Tomb:SM_Rune_Symbol materials, one on each of the 21 SM_Prop_Crystal_Rock_* models, A_01 through G_03, bind the same way: each rock carries a Dungeon2SHD material that resolves to Dungeons_2_Texture_01_A.png, and its rune material's UVs collapse to one point at U 0.0688 V 0.1242, adjacent to rather than inside the rock's own island at U 0.0526 to 0.0550, V 0.0497 to 0.1148, reading 120,116,110 stone grey, which is what a carved glyph on a rock is.",
     "_uncertain": "FX_Cart_Mesh_01 and _02 and FX_Chandelier_Mesh_01 are named FX but read as real geometry rather than effects; the FX exclusion was applied and they were not probed further, so they may be worth a second look. The portal spheres, sun shafts, candle flame and skydome are excluded by kind.",
     "flavors": {

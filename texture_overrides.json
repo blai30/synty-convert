@@ -13,10 +13,10 @@
     "Sky": "SkyBox.png",
     "PolygonConstruction_Texture_01_Atemp": "POLYGON_Construction_SourceFiles_v3::Textures/PolygonConstruction_Texture_01_A.png"
   },
-  "POLYGON_Dungeons_Realms_SourceFiles_v2": {
+  "POLYGON_Dungeons_Realms_SourceFiles_v5": {
     "PolygonConstruction_Texture_01_Atemp": "POLYGON_Construction_SourceFiles_v3::Textures/PolygonConstruction_Texture_01_A.png"
   },
-  "POLYGON_Dungeon_Pack_SourceFiles_v2": {
+  "POLYGON_Dungeon_Pack_SourceFiles_v3": {
     "Dungeons_Texture": "Dungeons_Texture_01.png"
   },
   "POLYGON_Adventure_Pack_SourceFiles_v5": {

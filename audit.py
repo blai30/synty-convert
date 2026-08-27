@@ -25,6 +25,12 @@ CHUNK_JSON = 0x4E4F534A
 # still holds more than one of them renders all of them at once.
 LOD_SUFFIX = re.compile(r"^(?P<base>.+)_LOD(?P<level>\d+)$", re.IGNORECASE)
 
+# What a generated flavor variant is allowed to hold differently from the base it was
+# copied from. It is its base wearing a different texture, so the texture and the names
+# and counts that follow from it may differ, and nothing else may.
+VARIANT_KEYS = {"name", "used_by", "variant_of", "source_names", "albedo_texture",
+                "reference", "match"}
+
 
 def gltf_of(path):
     with open(path, "rb") as handle:
@@ -117,13 +123,16 @@ def audit_manifests(root, dst, res_prefix, failures, stats):
                 else:
                     differs = {key for key in set(entry) | set(by_name[base])
                                if entry.get(key) != by_name[base].get(key)}
-                    # A variant is its base wearing a different texture. Anything else
-                    # differing means the copy picked up something it should not have.
-                    allowed = {"name", "used_by", "variant_of", "source_names",
-                               "albedo_texture", "reference", "match"}
-                    if differs - allowed:
+                    unexpected = differs - VARIANT_KEYS
+                    if unexpected:
                         failures["variant differs from its base beyond its texture"].append(
-                            f"{path}: {entry['name']} ({sorted(differs - allowed)})")
+                            f"{path}: {entry['name']} ({sorted(unexpected)})")
+                    # Permitting the texture to differ is not the same as requiring it to.
+                    # A variant that resolved back onto its base's own texture renders
+                    # identically to it, which makes swapping to it pointless.
+                    if "albedo_texture" not in differs:
+                        failures["variant wears the same texture as its base"].append(
+                            f"{path}: {entry['name']} -> {base}")
             if not entry.get("albedo_texture") and not entry.get("albedo_color"):
                 failures["material has neither texture nor colour"].append(f"{path}: {entry['name']}")
             if not entry.get("albedo_texture"):
