@@ -1,0 +1,25 @@
+{
+  "_comment": "Textures for materials the matcher cannot reach, and the interchangeable sets they belong to. texture_overrides.json is keyed on the texture stem an FBX asks for; this file is keyed on the FBX's own material name, which is the only handle on a material whose bitmap path was emptied before export. 'flavors' groups textures a pack ships as alternatives for one surface, either tileable variants of a surface or recolours of one atlas. 'bind' says which materials fall back to which set, matched on the model filename stem and on the material name, both optional. Those two are whole-name globs anchored at the start, so 'Wall*' means a material name beginning with Wall; this is deliberately unlike the 'flavors' member patterns above, which match the tail of a pack-relative path. Bindings are tried in order, first match wins, and only ever fill a channel that resolved to nothing. Keys starting with _ are ignored. Run --scan-materials --scan-report to see what is still bare in your own packs.",
+
+  "PolygonFantasyKingdom": {
+    "flavors": {
+      "Wall": {
+        "members": ["Textures/Castle/Wall_*.png"],
+        "default": "Wall_Brick_01.png"
+      },
+      "Roof": {
+        "members": ["Textures/Castle/Roof_Tile_*.png", "Textures/Castle/Roof_Slat_*.png"],
+        "default": "Roof_Tile_01.png"
+      },
+      "Atlas": {
+        "members": ["Textures/Alts/PolygonFantasyKingdom_01_*.png"],
+        "default": "PolygonFantasyKingdom_01_A.png"
+      }
+    },
+    "bind": [
+      { "model": "SM_Bld_Preset_*", "material": "PolygonCastle_GLASS", "flavor": "Atlas" },
+      { "material": "Wall*", "flavor": "Wall" },
+      { "material": "Roof*", "flavor": "Roof" }
+    ]
+  }
+}

@@ -33,6 +33,7 @@ import numpy
 from mathutils import Matrix
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import material_flavors
 import split_character_head
 import texture_matching
 
@@ -528,7 +529,32 @@ def transparency_of(record):
     return None
 
 
-def resolve_materials(context, warnings):
+def flavor_fill(context, source, material_name):
+    """The declared default for a material that resolved to no texture of its own.
+
+    Shaped exactly like resolve_texture's return so everything downstream, the canonical
+    name above all, cannot tell the difference between a texture the FBX asked for and one
+    this supplied.
+    """
+    declared = context.get("materials") or {}
+    binding = material_flavors.match_binding(declared.get("bind") or [],
+                                             os.path.splitext(os.path.basename(source))[0],
+                                             material_name)
+    if not binding:
+        return None
+    member = (declared.get("sets") or {})[binding["flavor"]]["default"]
+    relative = member.replace("/", os.sep)
+    candidate = os.path.join(context.get("output_root", ""), relative)
+    # Mirrors resolve_texture: an output pack that does not exist yet means this is a scan,
+    # and claiming a mirrored path that is not on disk would put a phantom file into the
+    # scan report that pack authors read.
+    return {"texture": candidate if os.path.exists(candidate) else None,
+            "texture_source": os.path.join(context.get("source_root", ""), relative),
+            "reference": None, "method": "flavor", "score": None,
+            "flavor": binding["flavor"], "binding": binding["material"]}
+
+
+def resolve_materials(context, source, warnings):
     """Map every imported material to a canonical record. Makes no changes to the scene."""
     context = context or {}
     resolved = {}
@@ -553,6 +579,12 @@ def resolve_materials(context, warnings):
         # eleven Military chain-link fences built this way were always going to look like.
         if record["channels"].get("alpha") and not record["channels"].get("albedo"):
             record["channels"]["albedo"] = record["channels"]["alpha"]
+        # Last, so a texture the FBX actually named always wins over a declared default,
+        # and so a mask promoted to colour above is not overwritten by one.
+        if not (record["channels"].get("albedo") or {}).get("texture_source"):
+            filled = flavor_fill(context, source, info["source"])
+            if filled:
+                record["channels"]["albedo"] = filled
         record["transparency"] = transparency_of(record)
         record["name"] = canonical_name(record)
         resolved[material.name] = record
@@ -654,12 +686,12 @@ def material_indices(mesh):
     return buffer
 
 
-def rebuild_materials(context, warnings):
+def rebuild_materials(context, source, warnings):
     """Replace every imported material with a canonically named, deduplicated one.
 
     Returns one record per distinct material for the CLI to turn into a Godot manifest.
     """
-    resolved = resolve_materials(context, warnings)
+    resolved = resolve_materials(context, source, warnings)
     # Capture slot assignments, then rebuild from scratch so names cannot collide. Emptying
     # a mesh's slots also resets every polygon's material_index to zero, so the per-face
     # assignment has to be carried across by hand; without it a multi-material mesh
@@ -1008,7 +1040,7 @@ def convert(job, options, packs):
         # applied first even though nothing is written, or the scan would report a tree as
         # untextured that a conversion of the same pack textures perfectly well.
         apply_foliage_textures(packs.get(job.get("pack"), {}), src, warnings)
-        resolved = resolve_materials(packs.get(job.get("pack"), {}), warnings)
+        resolved = resolve_materials(packs.get(job.get("pack"), {}), src, warnings)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "src_bytes": os.path.getsize(src),
                 "dst_bytes": 0, "materials": distinct_materials(resolved), "warnings": warnings,
                 "summary": scene_summary(), "normalized_scale": None}
@@ -1023,7 +1055,7 @@ def convert(job, options, packs):
     split = split_character_head.split_scene(warnings) if job.get("split") else []
     # Ahead of material resolution, which is what turns these bindings into real materials.
     foliage = apply_foliage_textures(packs.get(job.get("pack"), {}), src, warnings) if external else 0
-    materials = rebuild_materials(packs.get(job.get("pack"), {}), warnings) if external else []
+    materials = rebuild_materials(packs.get(job.get("pack"), {}), src, warnings) if external else []
     if not external:
         strip_materials()
 

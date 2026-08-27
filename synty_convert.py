@@ -33,6 +33,7 @@ WORKER_SCRIPT = Path(__file__).with_name("blender_convert.py")
 OVERRIDES_FILE = Path(__file__).with_name("texture_overrides.json")
 SCALES_FILE = Path(__file__).with_name("scale_overrides.json")
 FOLIAGE_FILE = Path(__file__).with_name("foliage_overrides.json")
+MATERIALS_FILE = Path(__file__).with_name("material_overrides.json")
 
 # Compared against a pack's median model, never an individual one. Synty ships plenty of
 # coins and gems under 10 cm, but a pack whose typical model is that small has had a unit
@@ -40,6 +41,7 @@ FOLIAGE_FILE = Path(__file__).with_name("foliage_overrides.json")
 MIN_PLAUSIBLE_SPAN = 0.1
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import material_flavors
 import texture_matching
 
 BLENDER_CANDIDATES = [
@@ -151,14 +153,23 @@ def mark_scales(jobs):
 
 
 def pack_contexts(packs, source_root, output_root):
-    """Per-pack texture index and manual overrides, shared with every worker."""
+    """Per-pack texture index and manual overrides, shared with every worker.
+
+    Returns the contexts and any complaint the override files made about themselves, which
+    the caller prints: a curated table that has silently stopped matching is the main way
+    these files rot.
+    """
     overrides = {}
     if OVERRIDES_FILE.exists():
         overrides = json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
     foliage = {}
     if FOLIAGE_FILE.exists():
         foliage = json.loads(FOLIAGE_FILE.read_text(encoding="utf-8"))
+    flavors = {}
+    if MATERIALS_FILE.exists():
+        flavors = json.loads(MATERIALS_FILE.read_text(encoding="utf-8"))
     indexes = {}
+    warnings = []
 
     def index(pack):
         if pack not in indexes:
@@ -175,6 +186,12 @@ def pack_contexts(packs, source_root, output_root):
             if texture_matching.FOREIGN_SEPARATOR in target:
                 other = target.split(texture_matching.FOREIGN_SEPARATOR, 1)[0]
                 foreign[other] = index(other)
+        config = {k: v for k, v in flavors.get(pack, {}).items() if not k.startswith("_")}
+        complaints = []
+        sets = material_flavors.expand_sets(config, index(pack), str(source_root / pack),
+                                            complaints)
+        bindings = material_flavors.normalize_bindings(config, sets, complaints)
+        warnings.extend(f"{pack}: {complaint}" for complaint in complaints)
         contexts[pack] = {
             "source_root": str(source_root / pack),
             "output_root": str(output_root / pack),
@@ -182,8 +199,9 @@ def pack_contexts(packs, source_root, output_root):
             "overrides": entries,
             "foreign": foreign,
             "foliage": {k: v for k, v in foliage.get(pack, {}).items() if not k.startswith("_")},
+            "materials": {"sets": sets, "bind": bindings},
         }
-    return contexts
+    return contexts, warnings
 
 
 def is_current(job):
@@ -560,7 +578,9 @@ def main():
 
     blender = find_blender(args.blender)
     started = time.monotonic()
-    contexts = pack_contexts(packs, source_root, output_root)
+    contexts, override_warnings = pack_contexts(packs, source_root, output_root)
+    for warning in override_warnings:
+        print(f"  material_overrides.json: {warning}")
     if not args.scan_materials:
         copy_assets(copies, args.force, totals)
     if jobs:
