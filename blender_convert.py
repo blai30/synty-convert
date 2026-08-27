@@ -961,10 +961,11 @@ def real_meshes():
 def binds_a_texture():
     """True when some mesh in the scene wears a material that bound an image.
 
-    What ``--skip-untextured`` asks. Read off the rebuilt materials the meshes actually
-    wear rather than off the resolution records, so a material that resolved but that no
-    mesh ended up wearing cannot vouch for a model that still ships white. Any channel
-    counts: a model carrying only an emission or normal map has real texture data on it.
+    What ``--untextured drop`` and ``--untextured fill-or-drop`` ask. Read off the
+    rebuilt materials the meshes actually wear rather than off the resolution records,
+    so a material that resolved but that no mesh ended up wearing cannot vouch for a
+    model that still ships white. Any channel counts: a model carrying only an
+    emission or normal map has real texture data on it.
     """
     for obj in real_meshes():
         for material in obj.data.materials:
@@ -1035,12 +1036,19 @@ def convert(job, options, packs):
     import_options["global_scale"] = job.get("scale", 1.0)
     bpy.ops.import_scene.fbx(filepath=src, **import_options)
 
+    mode = options.get("untextured", "fill")
+    context = packs.get(job.get("pack"), {})
+    if mode in ("keep", "drop"):
+        # Filling is off, so the worker must not see a binding table it would act on.
+        # --untextured keep --scan-materials is therefore how you see what is still bare.
+        context = {key: value for key, value in context.items() if key != "materials"}
+
     if options.get("scan_only"):
         # Report what the materials resolve to without writing output. Foliage bindings are
         # applied first even though nothing is written, or the scan would report a tree as
         # untextured that a conversion of the same pack textures perfectly well.
-        apply_foliage_textures(packs.get(job.get("pack"), {}), src, warnings)
-        resolved = resolve_materials(packs.get(job.get("pack"), {}), src, warnings)
+        apply_foliage_textures(context, src, warnings)
+        resolved = resolve_materials(context, src, warnings)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "src_bytes": os.path.getsize(src),
                 "dst_bytes": 0, "materials": distinct_materials(resolved), "warnings": warnings,
                 "summary": scene_summary(), "normalized_scale": None}
@@ -1054,15 +1062,15 @@ def convert(job, options, packs):
     # exported as ordinary meshes rather than needing a second pass over the finished GLB.
     split = split_character_head.split_scene(warnings) if job.get("split") else []
     # Ahead of material resolution, which is what turns these bindings into real materials.
-    foliage = apply_foliage_textures(packs.get(job.get("pack"), {}), src, warnings) if external else 0
-    materials = rebuild_materials(packs.get(job.get("pack"), {}), src, warnings) if external else []
+    foliage = apply_foliage_textures(context, src, warnings) if external else 0
+    materials = rebuild_materials(context, src, warnings) if external else []
     if not external:
         strip_materials()
 
     # Ahead of the remaining work, all of which would be spent on a file about to be thrown
     # away. Geometry is the qualifier: an animation file carries a skeleton and no mesh, so
     # it has nothing to texture and is not what this is meant to catch.
-    if options.get("skip_untextured") and real_meshes() and not binds_a_texture():
+    if mode in ("drop", "fill-or-drop") and real_meshes() and not binds_a_texture():
         # A previous run without the flag would have left one here, and leaving it would
         # put back exactly the model this was asked to keep out.
         if os.path.exists(dst):

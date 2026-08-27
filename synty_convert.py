@@ -522,11 +522,16 @@ def main():
                         help="split every rigged character's head onto its own mesh node, so it "
                              "can be hidden or moved to another render layer in Godot; "
                              "name substrings limit this to matching files")
-    parser.add_argument("--skip-untextured", action="store_true",
-                        help="do not write a model whose materials bound no texture at all, "
-                             "since it ships as a flat white or grey blob; deletes any such "
-                             "model an earlier run left behind. Animation files, which carry "
-                             "no mesh, are unaffected")
+    parser.add_argument("--untextured", choices=("fill", "keep", "drop", "fill-or-drop"),
+                        default="fill",
+                        help="what to do with a material that bound no texture. 'fill' gives "
+                             "it the default from its flavor set in material_overrides.json, "
+                             "which is what most bare Synty materials want; 'keep' leaves it "
+                             "as flat colour; 'drop' writes no model for it at all and "
+                             "deletes one an earlier run left behind; 'fill-or-drop' fills "
+                             "what it can and drops the rest. Animation files, which carry "
+                             "no mesh, are never dropped. This governs filling only: the "
+                             "swappable materials for every flavor set ship in all four modes")
     parser.add_argument("--scan-materials", action="store_true",
                         help="report how texture references resolve, without converting anything")
     parser.add_argument("--scan-report", type=Path, default=None, metavar="PATH",
@@ -542,10 +547,11 @@ def main():
     output_root = args.dst.resolve()
     if not source_root.is_dir():
         sys.exit(f"Source directory not found: {source_root}")
-    if args.skip_untextured and args.materials == "none":
-        # --materials none strips every material, so nothing would bind a texture and the
-        # run would write nothing at all.
-        sys.exit("--skip-untextured needs materials to judge; it cannot be used with --materials none.")
+    if args.untextured != "keep" and args.materials == "none":
+        # --materials none strips every material, so nothing would bind a texture, nothing
+        # could be filled, and a run that drops would write nothing at all.
+        sys.exit(f"--untextured {args.untextured} needs materials to judge; "
+                 f"it cannot be used with --materials none.")
     if args.scan_report and not args.scan_materials:
         sys.exit("--scan-report only has anything to write during --scan-materials.")
 
@@ -588,7 +594,7 @@ def main():
                    "animations": args.animations, "materials": args.materials,
                    "lods": args.lods, "scan_only": args.scan_materials,
                    "scan_report": bool(args.scan_report),
-                   "skip_untextured": args.skip_untextured}
+                   "untextured": args.untextured}
         convert_all(blender, jobs, options, contexts,
                     max(1, min(args.workers, len(jobs))), totals, args.quiet)
 
@@ -604,12 +610,12 @@ def main():
         sys.exit(1 if totals.failed else 0)
 
     report(totals, time.monotonic() - started)
-    if args.skip_untextured and totals.skipped:
+    if args.untextured in ("drop", "fill-or-drop") and totals.skipped:
         # Whether a model is untextured is only known once it has been through Blender, so
         # one the incremental check never handed over cannot have been judged.
         print(f"\n  Note: {totals.skipped} model(s) were already up to date and so were never "
               f"examined,\n  which means any untextured ones among them are still in the output."
-              f"\n  Rerun with --force to apply --skip-untextured across the whole tree.")
+              f"\n  Rerun with --force to apply --untextured {args.untextured} across the whole tree.")
     report_scale(totals)
     report_materials(totals)
     if args.split_heads:
