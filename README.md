@@ -336,6 +336,38 @@ An unresolved reference is one the matcher could not place. A material can also 
 
 Most are untextured because they were never meant to be textured: glass, water planes, fog rings, sky domes. Foliage is the exception, and it has a file of its own; see below.
 
+Some, though, are whole models that arrive as a flat white or grey blob. Fantasy Kingdom is the worst case: 15 of its 26 `SM_Bld_Preset_*_Optimized` buildings declare exactly one material, the glass one, because the body material was stripped when Synty exported them. The 11 that kept both materials convert perfectly well. Nothing in the file says what the missing atlas was, so there is nothing to resolve.
+
+### Leaving untextured models out entirely
+
+If you would rather not ship those at all, `--skip-untextured` writes no GLB for a model whose materials bound no texture on any channel, and deletes one an earlier run left behind:
+
+```bash
+python synty_convert.py --skip-untextured --force
+```
+
+Three things it deliberately does not catch:
+
+- **Animation files.** They carry a skeleton and no mesh, so there is nothing to texture. Geometry is the qualifier, which is what keeps the 694 files of the Base Locomotion pack out of it.
+- **Foliage bound from `foliage_overrides.json`.** Those bindings are applied before materials are resolved, so a tree whose FBX named nothing has real textures by the time the decision is made.
+- **A model that is only partly untextured.** One textured material is enough to keep it, since the rest may be glass or water that was never meant to carry one.
+
+What it does catch, which is worth knowing before you use it, is any untextured model that is not a blob: `PolygonSyntyCharacter.fbx` and `SidekickSyntyCharacter.fbx`, the two reference bodies the Base Locomotion animations are built against, bind no texture and so are dropped along with the rest. Convert that pack without the flag if you want them.
+
+The flag needs materials to judge, so it cannot be combined with `--materials none`. It also only sees models that actually go through Blender: a model already up to date is never re-examined, so the first run with the flag wants `--force`. The summary says how many were left out, per pack:
+
+```
+Untextured 597 model(s) not written, no material bound a texture
+               2  ANIMATION_Base_Locomotion_SourceFiles_v3
+              24  POLYGON_BattleRoyale_Source_Files_v4
+              47  POLYGON_Construction_SourceFiles_v3
+              42  POLYGON_Military_SourceFiles_v4
+              83  POLYGON_SciFi_City_SourceFiles_v5
+             231  PolygonFantasyKingdom
+```
+
+Across all 16 packs that is 597 of 10743 models, or 5.6%.
+
 ## Foliage that names no texture
 
 Synty's Nature Biomes packs export their detailed trees and bushes with the material bindings stripped. One grey Lambert covers the whole model, and because that foliage is built from alpha cutout cards, each quad drawing a leaf texture across the whole of UV space, an untextured card has no coverage to cut with. The model arrives white with solid quads where its leaves should be, which is a good deal more broken looking than merely grey.
@@ -429,6 +461,7 @@ godot --headless --script res://tools/verify_import.gd -- --assets res://assets
 | `--materials-dir`  | `materials`        | Where the per-pack manifests are written                      |
 | `--res-prefix`     | `res://<dst name>` | Where the assets will live in the target Godot project        |
 | `--split-heads`    | off                | Put each character's head on its own mesh node                |
+| `--skip-untextured`| off                | Do not write models whose materials bound no texture          |
 | `--scan-materials` | off                | Report texture resolution only, write nothing                 |
 | `--force`          | off                | Reconvert files that are already up to date                   |
 | `--verify`         | off                | Reimport each GLB and check bounds, bone and action parity    |
@@ -470,6 +503,9 @@ Its FBX declare a unit the geometry is not in. See [Fixing a pack that converts 
 
 **A tree or bush is white, with flat quads where its leaves should be**
 Its FBX binds no texture, so the alpha cutout that shapes each leaf card has nothing to cut with. Add it to [foliage_overrides.json](#foliage-that-names-no-texture) and reconvert with `--force`. Quads spanning the whole canopy are a separate thing, the LOD imposter, and mean the model was converted with `--lods keep`.
+
+**A building or prop is flat white or flat grey, with no texture anywhere on it**
+Its FBX bound no texture to begin with, so there was nothing to carry across. Check the model's materials in `materials/<pack>/materials.json`: an entry with `albedo_color` and no `albedo_texture` is one of these. Where the missing atlas is obvious it can be named in [texture_overrides.json](#fixing-unresolved-textures), but a material that references no file at all cannot be reached that way and there is usually nothing in the file to identify it with. To leave those models out of the output, convert with [`--skip-untextured`](#leaving-untextured-models-out-entirely).
 
 **Godot is importing my source FBX**
 Keep `synty_packs_fbx/` outside your Godot project, or drop an empty `.gdignore` file in it.

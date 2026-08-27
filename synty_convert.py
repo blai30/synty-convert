@@ -75,6 +75,7 @@ class Totals:
     split: dict = field(default_factory=dict)
     lods: dict = field(default_factory=dict)
     foliage: dict = field(default_factory=dict)
+    untextured: dict = field(default_factory=dict)
     spans: dict = field(default_factory=lambda: collections.defaultdict(list))
 
 
@@ -232,6 +233,11 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
     done = 0
     total = len(jobs)
 
+    def tick():
+        if not quiet and (done % 25 == 0 or done == total):
+            ratio = 100.0 * (1 - totals.dst_bytes / max(totals.src_bytes, 1))
+            print(f"  [{done}/{total}] {human(totals.src_bytes)} -> {human(totals.dst_bytes)} ({ratio:.1f}% smaller)")
+
     def record(result):
         nonlocal done
         done += 1
@@ -239,6 +245,14 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             totals.failed += 1
             totals.failures.append((result.get("src"), result.get("error", "").strip().splitlines()[-1:]))
             print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
+            return
+        if result.get("untextured"):
+            # Nothing was written and no material survives to describe, so this contributes
+            # neither bytes to the totals nor an entry to the pack's manifest. Its warnings
+            # are the unresolved references that got it dropped, which the summary line
+            # already says, so they stay out of a list meant for what shipped.
+            totals.untextured[result["src"]] = result.get("pack", "")
+            tick()
             return
         totals.converted += 1
         totals.src_bytes += result["src_bytes"]
@@ -264,9 +278,7 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
         check = result.get("verify")
         if check and not check.get("ok"):
             totals.warnings.append(f"{Path(result['src']).name}: verification mismatch {check}")
-        if not quiet and (done % 25 == 0 or done == total):
-            ratio = 100.0 * (1 - totals.dst_bytes / max(totals.src_bytes, 1))
-            print(f"  [{done}/{total}] {human(totals.src_bytes)} -> {human(totals.dst_bytes)} ({ratio:.1f}% smaller)")
+        tick()
 
     batches = chunk(jobs, workers)
     with ThreadPoolExecutor(max_workers=len(batches)) as pool:
@@ -430,6 +442,10 @@ def report(totals, elapsed):
     if totals.foliage:
         print(f"Foliage   bound {sum(totals.foliage.values())} mesh(es) across "
               f"{len(totals.foliage)} model(s) whose FBX named no texture")
+    if totals.untextured:
+        print(f"Untextured {len(totals.untextured)} model(s) not written, no material bound a texture")
+        for pack, count in sorted(collections.Counter(totals.untextured.values()).items()):
+            print(f"          {count:6d}  {pack}")
     if totals.converted:
         saved = totals.src_bytes - totals.dst_bytes
         ratio = 100.0 * saved / max(totals.src_bytes, 1)
@@ -483,6 +499,11 @@ def main():
                         help="split every rigged character's head onto its own mesh node, so it "
                              "can be hidden or moved to another render layer in Godot; "
                              "name substrings limit this to matching files")
+    parser.add_argument("--skip-untextured", action="store_true",
+                        help="do not write a model whose materials bound no texture at all, "
+                             "since it ships as a flat white or grey blob; deletes any such "
+                             "model an earlier run left behind. Animation files, which carry "
+                             "no mesh, are unaffected")
     parser.add_argument("--scan-materials", action="store_true",
                         help="report how texture references resolve, without converting anything")
     parser.add_argument("--dry-run", action="store_true", help="list what would happen and exit")
@@ -494,6 +515,10 @@ def main():
     output_root = args.dst.resolve()
     if not source_root.is_dir():
         sys.exit(f"Source directory not found: {source_root}")
+    if args.skip_untextured and args.materials == "none":
+        # --materials none strips every material, so nothing would bind a texture and the
+        # run would write nothing at all.
+        sys.exit("--skip-untextured needs materials to judge; it cannot be used with --materials none.")
 
     jobs, copies = discover(source_root, output_root, args.packs)
     if not jobs and not copies:
@@ -530,7 +555,8 @@ def main():
     if jobs:
         options = {"verify": args.verify, "vertex_colors": args.vertex_colors,
                    "animations": args.animations, "materials": args.materials,
-                   "lods": args.lods, "scan_only": args.scan_materials}
+                   "lods": args.lods, "scan_only": args.scan_materials,
+                   "skip_untextured": args.skip_untextured}
         convert_all(blender, jobs, options, contexts,
                     max(1, min(args.workers, len(jobs))), totals, args.quiet)
 
@@ -541,6 +567,12 @@ def main():
         sys.exit(1 if totals.failed else 0)
 
     report(totals, time.monotonic() - started)
+    if args.skip_untextured and totals.skipped:
+        # Whether a model is untextured is only known once it has been through Blender, so
+        # one the incremental check never handed over cannot have been judged.
+        print(f"\n  Note: {totals.skipped} model(s) were already up to date and so were never "
+              f"examined,\n  which means any untextured ones among them are still in the output."
+              f"\n  Rerun with --force to apply --skip-untextured across the whole tree.")
     report_scale(totals)
     report_materials(totals)
     if args.split_heads:

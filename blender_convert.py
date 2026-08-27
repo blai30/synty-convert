@@ -926,6 +926,23 @@ def real_meshes():
             if obj.type == "MESH" and obj not in widgets and obj.data.vertices]
 
 
+def binds_a_texture():
+    """True when some mesh in the scene wears a material that bound an image.
+
+    What ``--skip-untextured`` asks. Read off the rebuilt materials the meshes actually
+    wear rather than off the resolution records, so a material that resolved but that no
+    mesh ended up wearing cannot vouch for a model that still ships white. Any channel
+    counts: a model carrying only an emission or normal map has real texture data on it.
+    """
+    for obj in real_meshes():
+        for material in obj.data.materials:
+            if not material or not material.use_nodes:
+                continue
+            if any(node.type == "TEX_IMAGE" and node.image for node in material.node_tree.nodes):
+                return True
+    return False
+
+
 def world_coordinates(obj):
     """Every vertex of ``obj`` in world space.
 
@@ -1009,6 +1026,18 @@ def convert(job, options, packs):
     materials = rebuild_materials(packs.get(job.get("pack"), {}), warnings) if external else []
     if not external:
         strip_materials()
+
+    # Ahead of the remaining work, all of which would be spent on a file about to be thrown
+    # away. Geometry is the qualifier: an animation file carries a skeleton and no mesh, so
+    # it has nothing to texture and is not what this is meant to catch.
+    if options.get("skip_untextured") and real_meshes() and not binds_a_texture():
+        # A previous run without the flag would have left one here, and leaving it would
+        # put back exactly the model this was asked to keep out.
+        if os.path.exists(dst):
+            os.remove(dst)
+        return {"src": src, "dst": dst, "pack": job.get("pack"), "untextured": True,
+                "src_bytes": os.path.getsize(src), "dst_bytes": 0, "materials": [],
+                "warnings": warnings}
 
     # Neither dropping takes nor normalizing may move anything, so the world bounds are an
     # always-on invariant across both.
