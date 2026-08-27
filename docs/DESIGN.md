@@ -157,7 +157,7 @@ That file ships with 24 curated mappings across 9 packs, which take the number o
 
 Values are stored as the shortest path suffix that still names exactly one file in the pack, tested with the same bare `endswith` the resolver uses. Keeping them short means a mapping survives a pack whose folders are nested differently between versions.
 
-The mappings stop where the evidence does. `Wall_01.psd` matches five shipped wall textures in FantasyKingdom and `RopeBridge.png` has no counterpart, so both stay unresolved. A wrong texture renders as plausible but incorrect art, which is much harder to spot than an untextured model that the report names explicitly.
+The mappings stop where the evidence does. A reference to a pack you do not own has no counterpart to find, which is what leaves `PolygonApocalypse_Texture_01_Cleaned.psd` unresolved in both Military and FantasyKingdom, and most normal map references name a file the pack never shipped. Those stay unresolved and stay in the report. Ambiguity is a separate case with its own answer: where a pack ships several equally plausible candidates for one surface, as FantasyKingdom does with five wall textures, `material_overrides.json` groups them into a flavor set, binds the material to a declared default and ships every candidate as a material the consumer can swap to. A wrong texture renders as plausible but incorrect art, which is much harder to spot than an untextured model that the report names explicitly.
 
 ### Coverage
 
