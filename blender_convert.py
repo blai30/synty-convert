@@ -512,7 +512,9 @@ def resolve_texture(reference, context, warnings, channel):
         warnings.append(f"unresolved {label}texture reference '{reference}'")
     return {"texture": texture_path, "texture_source": match.path if match else None,
             "reference": reference, "method": match.method if match else None,
-            "score": match.score if match else None}
+            "score": match.score if match else None,
+            "member": os.path.relpath(match.path, source_root).replace(os.sep, "/")
+                      if match else None}
 
 
 def transparency_of(record):
@@ -551,7 +553,8 @@ def flavor_fill(context, source, material_name):
     return {"texture": candidate if os.path.exists(candidate) else None,
             "texture_source": os.path.join(context.get("source_root", ""), relative),
             "reference": None, "method": "flavor", "score": None,
-            "flavor": binding["flavor"], "binding": binding["material"]}
+            "flavor": binding["flavor"], "binding": binding["material"],
+            "member": member}
 
 
 def resolve_materials(context, source, warnings):

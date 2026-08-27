@@ -335,18 +335,64 @@ def channel_of(entry, name):
     return (entry.get("channels") or {}).get(name) or {}
 
 
-def write_manifests(totals, materials_root, output_root, res_prefix):
+def flavor_variants(record, entry, sets, output_root, pack, res_prefix, warnings):
+    """Sibling records for the rest of the flavor set this material's texture belongs to.
+
+    Generated per observed material rather than per set, so a material carrying qualifiers
+    keeps them: PolygonFantasyKingdom_01_A_R75_M50 yields _01_B_R75_M50, and nothing has to
+    invent surface properties for a texture no FBX ever bound.
+    """
+    member = channel_of(entry, "albedo").get("member")
+    if not member or not sets:
+        return []
+    base_stem = Path(member).stem
+    if not record["name"].startswith(base_stem):
+        # The material is not named after its atlas, so there is no safe way to rename it
+        # for a sibling texture. canonical_name only departs from the atlas when no albedo
+        # resolved, which this member proves is not the case.
+        return []
+    qualifiers = record["name"][len(base_stem):]
+    siblings = []
+    for other in material_flavors.variants_of(member, sets):
+        target = Path(output_root) / pack / other
+        if not target.exists():
+            # The same rule flavor_fill follows: a manifest must never name a texture that
+            # is not on disk. A member catalogued by scanning the source pack is not proof
+            # that it was mirrored into the output.
+            warnings.append(f"{pack}: flavor variant {Path(other).stem} skipped, "
+                            f"{other} was not mirrored into the output")
+            continue
+        sibling = dict(record)
+        sibling["name"] = Path(other).stem + qualifiers
+        sibling["used_by"] = 0
+        sibling["variant_of"] = record["name"]
+        sibling["source_names"] = []
+        sibling["albedo_texture"] = as_res_path(target, output_root, res_prefix)
+        sibling.pop("reference", None)
+        sibling.pop("match", None)
+        siblings.append(sibling)
+    return siblings
+
+
+def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
     """Write one manifest per pack for the Godot material generator to consume.
 
     The converter deliberately stops here rather than authoring .tres itself, so that
     Godot assigns every resource id and uid. Every channel the GLB carries is described
-    here too, so a shared material and the model's own render the same way.
+    here too, so a shared material and the model's own render the same way. Every material
+    whose texture belongs to a flavor set also gets a sibling entry per other member of that
+    set, so a consumer can re-skin a model by swapping in a different generated .tres.
     """
     written = []
+    # Not totals.warnings: report() has already printed and returned by the time main()
+    # calls this, so appending there would never reach the user. Printed directly below
+    # instead, in the same "N warning(s):" shape report() uses for everything else.
+    warnings = []
     for pack, materials in sorted(totals.materials.items()):
         if not pack or not materials:
             continue
         entries = []
+        observed = []
         for name, entry in sorted(materials.items()):
             albedo, emission = channel_of(entry, "albedo"), channel_of(entry, "emission")
             normal = channel_of(entry, "normal")
@@ -381,11 +427,36 @@ def write_manifests(totals, materials_root, output_root, res_prefix):
                 record[key] = asked["reference"]
                 record["match" if channel == "albedo" else channel + "_match"] = asked.get("method")
             entries.append(record)
+            observed.append((record, entry))
+        sets = ((contexts.get(pack) or {}).get("materials") or {}).get("sets") or {}
+        by_name = {record["name"]: record for record in entries}
+        for record, entry in observed:
+            for sibling in flavor_variants(record, entry, sets, output_root, pack,
+                                           res_prefix, warnings):
+                existing = by_name.get(sibling["name"])
+                if existing is None:
+                    by_name[sibling["name"]] = sibling
+                elif existing.get("variant_of"):
+                    # Two observed materials whose qualifiers round to the same text want
+                    # the same variant name for different surface properties. Keeping the
+                    # first is deterministic, but the other one is being discarded.
+                    warnings.append(f"{pack}: flavor variant {sibling['name']} generated "
+                                    f"twice, from {existing['variant_of']} and "
+                                    f"{sibling['variant_of']}; keeping the first")
+                # An observed material always beats a generated one wearing the same name,
+                # which needs no warning: that is the point of generating them.
+        entries = [by_name[name] for name in sorted(by_name)]
         target = materials_root / pack / "materials.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps({"pack": pack, "materials": entries}, indent=2) + "\n",
                           encoding="utf-8")
         written.append((target, len(entries)))
+    if warnings:
+        print(f"\n{len(warnings)} flavor variant warning(s):")
+        for warning in warnings[:15]:
+            print(f"  {warning}")
+        if len(warnings) > 15:
+            print(f"  ... and {len(warnings) - 15} more")
     return written
 
 
@@ -629,7 +700,7 @@ def main():
     if args.materials == "external":
         materials_root = args.materials_dir.resolve()
         prefix = args.res_prefix or f"res://{output_root.name}"
-        written = write_manifests(totals, materials_root, output_root, prefix)
+        written = write_manifests(totals, materials_root, output_root, prefix, contexts)
         for target, count in written:
             print(f"  wrote {target} ({count} materials)")
         if not written and totals.skipped:
