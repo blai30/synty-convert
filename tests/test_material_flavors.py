@@ -82,6 +82,27 @@ class ExpandSets(unittest.TestCase):
         self.assertNotIn("Wall", sets)
         self.assertTrue(any("default" in w for w in warnings), warnings)
 
+    def test_cutout_flag_is_carried_through(self):
+        # A set declared with cutout: true is a card whose colour is also its coverage, and
+        # that has to survive expand_sets or the flavor fill has no way to know to bind it
+        # as a mask as well as an albedo.
+        warnings = []
+        sets = material_flavors.expand_sets(
+            {"flavors": {"Wall": {"members": ["Textures/Castle/Wall_*.png"],
+                                  "default": "Wall_Brick_01.png", "cutout": True}}},
+            TEXTURES, ROOT, warnings)
+        self.assertTrue(sets["Wall"]["cutout"])
+
+    def test_cutout_flag_defaults_to_false(self):
+        # Most sets are opaque surfaces and never mention cutout at all, so its absence has
+        # to resolve to a real False rather than a missing key a caller must guard for.
+        warnings = []
+        sets = material_flavors.expand_sets(
+            {"flavors": {"Wall": {"members": ["Textures/Castle/Wall_*.png"],
+                                  "default": "Wall_Brick_01.png"}}},
+            TEXTURES, ROOT, warnings)
+        self.assertIs(sets["Wall"]["cutout"], False)
+
     def test_overlapping_sets_warn(self):
         warnings = []
         material_flavors.expand_sets(

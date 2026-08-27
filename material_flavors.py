@@ -46,6 +46,12 @@ def expand_sets(config, textures, source_root, warnings):
     A set whose default is not among its own members is dropped rather than guessed at: the
     default is the one member that gets applied without anybody asking for it, so a typo
     there would put an unintended texture on every model the set binds.
+
+    A set may also declare ``cutout``, which says its default is an alpha card rather than
+    an opaque surface: a Synty foliage or netting quad has no coverage of its own to cut
+    with until the same image is bound as both colour and mask. The flag is carried through
+    unchanged, defaulting to false when a set does not declare it, so a caller filling a bare
+    material can tell the two cases apart.
     """
     relatives = sorted(relative(path, source_root) for path in textures)
     sets = {}
@@ -67,7 +73,8 @@ def expand_sets(config, textures, source_root, warnings):
             warnings.append(f"flavor set '{name}' default '{target}' matches "
                             f"{len(chosen)} of its {len(members)} members; set ignored")
             continue
-        sets[name] = {"members": members, "default": chosen[0]}
+        sets[name] = {"members": members, "default": chosen[0],
+                      "cutout": bool(entry.get("cutout"))}
 
     # One texture in two sets makes variant expansion ambiguous, since a material wearing it
     # would have two different families of sibling to generate.

@@ -157,8 +157,8 @@ class FlavorVariants(unittest.TestCase):
 
         self.assertIn("\n1 flavor variant warning(s):", output)
         self.assertIn(
-            f"{PACK}: flavor variant Atlas_01_B_R75 generated twice, from "
-            f"Atlas_01_A_R75 and Atlas_01_C_R75; keeping the first", output)
+            f"{PACK}: flavor variant Atlas_01_B_R75 generated twice with differing "
+            f"roughness, from Atlas_01_A_R75 and Atlas_01_C_R75; keeping the first", output)
 
         survivors = [material for material in manifest["materials"]
                      if material["name"] == "Atlas_01_B_R75"]
@@ -169,6 +169,58 @@ class FlavorVariants(unittest.TestCase):
         # Atlas_01_C_R75 both already existed) must stay silent.
         self.assertNotIn("flavor variant Atlas_01_A_R75 generated twice", output)
         self.assertNotIn("flavor variant Atlas_01_C_R75 generated twice", output)
+
+    def test_generated_variant_collision_stays_silent_when_identical(self):
+        # Two observed materials in one set that render identically in every rendered
+        # property, so their generated siblings collide but neither is losing anything.
+        for letter in ("A", "B", "C"):
+            self.mirror(f"Textures/Atlas_01_{letter}.png")
+
+        sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png",
+                                       "Textures/Atlas_01_C.png"],
+                          "default": "Textures/Atlas_01_A.png"}}
+        contexts = {PACK: {"materials": {"sets": sets}}}
+
+        def albedo_channel(letter):
+            texture = self.output_root / PACK / "Textures" / f"Atlas_01_{letter}.png"
+            return {"texture": str(texture), "texture_source": str(texture),
+                    "member": f"Textures/Atlas_01_{letter}.png"}
+
+        def material_entry(letter, used_by, source):
+            return {"used_by": used_by, "sources": {source},
+                    "channels": {"albedo": albedo_channel(letter)},
+                    "color": [1.0, 1.0, 1.0], "alpha": 1.0,
+                    "emission_color": [0.0, 0.0, 0.0], "emission_strength": 1.0,
+                    "roughness": 0.5528, "metallic": 0.0, "normal_strength": 1.0}
+
+        totals = synty_convert.Totals()
+        totals.materials = {PACK: {
+            "Atlas_01_A_R55": material_entry("A", 3, "SM_Foo"),
+            "Atlas_01_C_R55": material_entry("C", 2, "SM_Bar"),
+        }}
+
+        with tempfile.TemporaryDirectory() as materials_dir:
+            materials_root = Path(materials_dir)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                synty_convert.write_manifests(
+                    totals, materials_root, self.output_root, RES_PREFIX, contexts)
+            output = stdout.getvalue()
+            manifest = json.loads(
+                (materials_root / PACK / "materials.json").read_text(encoding="utf-8"))
+
+        names = [material["name"] for material in manifest["materials"]]
+
+        # Guard against a vacuous test: two observed materials plus one surviving generated
+        # sibling, same shape as the differing case above.
+        self.assertEqual(len(names), 3)
+        self.assertIn("Atlas_01_B_R55", names)
+
+        self.assertNotIn("generated twice", output)
+
+        survivors = [material for material in manifest["materials"]
+                     if material["name"] == "Atlas_01_B_R55"]
+        self.assertEqual(len(survivors), 1)
 
 
 if __name__ == "__main__":

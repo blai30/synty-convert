@@ -297,15 +297,16 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
                 entry = pack.setdefault(material["name"], dict(material, used_by=0, sources=set()))
                 entry["used_by"] += 1
                 entry["sources"].add(material["source"])
-            # Counted here, straight off this model's own records, rather than off
-            # totals.materials: the setdefault above can let a fill merge into and disappear
-            # behind a normally-resolved record of the same name, and which one wins depends on
-            # thread scheduling. Reporting from that merged dict would be nondeterministic.
-            for material in result.get("materials", []):
-                albedo = (material.get("channels") or {}).get("albedo") or {}
-                if albedo.get("method") == "flavor":
-                    totals.filled[(result.get("pack", ""), albedo["binding_model"],
-                                   albedo["binding"], material["name"], albedo["flavor"])] += 1
+            # Two merges stand between a fill and totals.materials, both keyed on a material's
+            # canonical name: the setdefault above, across models, whose winner depends on
+            # thread scheduling, and blender_convert.py's distinct_materials, within one model,
+            # which discards a fill marker before the result ever leaves the worker.
+            # Read from the worker's pre-dedup fill list rather than from result["materials"]:
+            # distinct_materials collapses two materials in one model that share a canonical
+            # name, and a fill that loses that collapse would otherwise be invisible here.
+            for fill in result.get("fills", []):
+                totals.filled[(result.get("pack", ""), fill["binding_model"],
+                               fill["binding"], fill["name"], fill["flavor"])] += 1
             if result.get("split"):
                 totals.split[result["src"]] = result["split"]
             if result.get("dropped_lods"):
@@ -458,12 +459,17 @@ def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
                 if existing is None:
                     by_name[sibling["name"]] = sibling
                 elif existing.get("variant_of"):
-                    # Two observed materials whose qualifiers round to the same text want
-                    # the same variant name for different surface properties. Keeping the
-                    # first is deterministic, but the other one is being discarded.
-                    warnings.append(f"{pack}: flavor variant {sibling['name']} generated "
-                                    f"twice, from {existing['variant_of']} and "
-                                    f"{sibling['variant_of']}; keeping the first")
+                    # Two observed materials in one set can want the same sibling name. That
+                    # only costs something when the two would render differently: when they
+                    # are identical apart from which base produced them, dropping either is
+                    # free and saying so would train the reader to ignore the real case.
+                    differs = {key for key in set(existing) | set(sibling)
+                               if key != "variant_of" and existing.get(key) != sibling.get(key)}
+                    if differs:
+                        warnings.append(f"{pack}: flavor variant {sibling['name']} generated "
+                                        f"twice with differing {', '.join(sorted(differs))}, "
+                                        f"from {existing['variant_of']} and "
+                                        f"{sibling['variant_of']}; keeping the first")
                 # An observed material always beats a generated one wearing the same name,
                 # which needs no warning: that is the point of generating them.
         entries = [by_name[name] for name in sorted(by_name)]

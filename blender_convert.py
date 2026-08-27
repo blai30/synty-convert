@@ -544,7 +544,8 @@ def flavor_fill(context, source, material_name):
                                              material_name)
     if not binding:
         return None
-    member = (declared.get("sets") or {})[binding["flavor"]]["default"]
+    chosen = (declared.get("sets") or {})[binding["flavor"]]
+    member = chosen["default"]
     relative = member.replace("/", os.sep)
     candidate = os.path.join(context.get("output_root", ""), relative)
     # Mirrors resolve_texture: an output pack that does not exist yet means this is a scan,
@@ -554,7 +555,8 @@ def flavor_fill(context, source, material_name):
             "texture_source": os.path.join(context.get("source_root", ""), relative),
             "reference": None, "method": "flavor", "score": None,
             "flavor": binding["flavor"], "binding": binding["material"],
-            "binding_model": binding["model"], "member": member}
+            "binding_model": binding["model"], "member": member,
+            "cutout": bool(chosen.get("cutout"))}
 
 
 def resolve_materials(context, source, warnings):
@@ -588,6 +590,12 @@ def resolve_materials(context, source, warnings):
             filled = flavor_fill(context, source, info["source"])
             if filled:
                 record["channels"]["albedo"] = filled
+                if filled["cutout"]:
+                    # A Synty foliage card is its own coverage: the quad draws one leaf
+                    # across the whole of UV space and everything around it is meant to be
+                    # cut away. Binding the colour alone ships the leaf as a solid
+                    # rectangle, so the same image has to serve as the mask.
+                    record["channels"]["alpha"] = filled
         record["transparency"] = transparency_of(record)
         record["name"] = canonical_name(record)
         resolved[material.name] = record
@@ -682,6 +690,27 @@ def distinct_materials(resolved):
     return list(records.values())
 
 
+def flavor_fills(resolved):
+    """Every flavor fill this model took, read before canonical names are deduplicated.
+
+    distinct_materials collapses two materials that settled on the same canonical name, and
+    when one of them was filled while the other resolved from its own reference, whichever
+    Blender listed first wins and the loser's fill marker goes with it. Reading fills here,
+    off the pre-dedup records, keeps a fill visible even where the material it produced
+    merges into a twin that never needed filling.
+    """
+    fills = {}
+    for entry in resolved.values():
+        albedo = entry["channels"].get("albedo") or {}
+        if albedo.get("method") != "flavor":
+            continue
+        # One model filling the same binding twice is still one model in the report.
+        fills[(albedo["binding_model"], albedo["binding"], entry["name"],
+               albedo["flavor"])] = None
+    return [{"binding_model": model, "binding": binding, "name": name, "flavor": flavor}
+            for model, binding, name, flavor in fills]
+
+
 def material_indices(mesh):
     """The material slot each polygon is assigned to."""
     buffer = [0] * len(mesh.polygons)
@@ -692,9 +721,12 @@ def material_indices(mesh):
 def rebuild_materials(context, source, warnings):
     """Replace every imported material with a canonically named, deduplicated one.
 
-    Returns one record per distinct material for the CLI to turn into a Godot manifest.
+    Returns a ``(materials, fills)`` tuple: one record per distinct material for the CLI to
+    turn into a Godot manifest, and the flavor fills this model took, read before
+    distinct_materials below deduplicates canonical names and can carry one away silently.
     """
     resolved = resolve_materials(context, source, warnings)
+    fills = flavor_fills(resolved)
     # Capture slot assignments, then rebuild from scratch so names cannot collide. Emptying
     # a mesh's slots also resets every polygon's material_index to zero, so the per-face
     # assignment has to be carried across by hand; without it a multi-material mesh
@@ -715,7 +747,7 @@ def rebuild_materials(context, source, warnings):
         for name in names:
             mesh.materials.append(created.get(name) if name else None)
         mesh.polygons.foreach_set("material_index", indices)
-    return list(records.values())
+    return list(records.values()), fills
 
 
 def read_glb(path):
@@ -1053,7 +1085,8 @@ def convert(job, options, packs):
         apply_foliage_textures(context, src, warnings)
         resolved = resolve_materials(context, src, warnings)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "src_bytes": os.path.getsize(src),
-                "dst_bytes": 0, "materials": distinct_materials(resolved), "warnings": warnings,
+                "dst_bytes": 0, "materials": distinct_materials(resolved),
+                "fills": flavor_fills(resolved), "warnings": warnings,
                 "summary": scene_summary(), "normalized_scale": None}
 
     if options.get("vertex_colors") != "keep":
@@ -1066,7 +1099,7 @@ def convert(job, options, packs):
     split = split_character_head.split_scene(warnings) if job.get("split") else []
     # Ahead of material resolution, which is what turns these bindings into real materials.
     foliage = apply_foliage_textures(context, src, warnings) if external else 0
-    materials = rebuild_materials(context, src, warnings) if external else []
+    materials, fills = rebuild_materials(context, src, warnings) if external else ([], [])
     if not external:
         strip_materials()
 
@@ -1080,7 +1113,7 @@ def convert(job, options, packs):
             os.remove(dst)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "untextured": True,
                 "src_bytes": os.path.getsize(src), "dst_bytes": 0, "materials": [],
-                "warnings": warnings}
+                "fills": [], "warnings": warnings}
 
     # Neither dropping takes nor normalizing may move anything, so the world bounds are an
     # always-on invariant across both.
@@ -1119,6 +1152,7 @@ def convert(job, options, packs):
         "normalized_scale": applied_scale,
         "summary": source_summary,
         "materials": materials,
+        "fills": fills,
         "split": split,
         "dropped_lods": dropped_lods,
         "foliage": foliage,
