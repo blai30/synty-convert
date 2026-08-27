@@ -21,6 +21,19 @@ TEXTURES = [os.path.join(ROOT, *parts) for parts in (
 )]
 
 
+class MatchesSuffix(unittest.TestCase):
+
+    def test_short_glob_matches_against_a_deeper_path(self):
+        # Every glob in the fixtures above is written as a complete pack-relative path, so
+        # none of them exercise suffix matching itself. A real member glob in
+        # material_overrides.json is one or two segments, matched against a shipped path
+        # that runs deeper, the way "Textures/Leaves/leaf.png" matches a file actually
+        # sitting under "Source Files/Textures/Leaves/leaf.png". Without the leading "*"
+        # fnmatchcase demands the whole string, not just its tail, so this fails.
+        self.assertTrue(material_flavors.matches_suffix(
+            "Source Files/Textures/Leaves/leaf.png", "Textures/Leaves/leaf.png"))
+
+
 class ExpandSets(unittest.TestCase):
 
     def test_glob_is_scoped_to_its_folder(self):

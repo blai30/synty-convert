@@ -107,5 +107,23 @@ class DeadChecksModelAndMaterialTogether(unittest.TestCase):
         self.assertNotIn("SM_Bld_Preset_*", dead_lines[0])
 
 
+class UntexturedCountExcludesFills(unittest.TestCase):
+    """Regression test for the fill exclusion in the untextured count.
+
+    A flavor fill leaves `reference` empty, since nothing in the FBX asked for the texture
+    it received, but it does carry a `texture`. Without excluding that case too, a material
+    the pack just fixed by filling it would still be counted as untextured, undoing the
+    point of filling it.
+    """
+
+    def test_filled_material_is_not_counted_as_untextured(self):
+        totals = synty_convert.Totals()
+        totals.materials = {PACK: {
+            "Wall_Brick_01": material_entry("Wall_Brick_01", "flavor", None)}}
+        contexts = {PACK: {"materials": {"sets": {}, "bind": []}}}
+        output = run_report(totals, contexts)
+        self.assertIn("0 untextured", output)
+
+
 if __name__ == "__main__":
     unittest.main()

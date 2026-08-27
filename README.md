@@ -364,7 +364,7 @@ Three things drop and fill-or-drop deliberately do not catch:
 
 What drop and fill-or-drop do catch, which is worth knowing before you use them, is any untextured model that is not a blob: `PolygonSyntyCharacter.fbx` and `SidekickSyntyCharacter.fbx`, the two reference bodies the Base Locomotion animations are built against, bind no texture, have no flavor set to fall back to either since Base Locomotion declares none, and so are dropped along with the rest. Convert that pack with `--untextured keep` if you want them.
 
-Every mode except `keep` needs materials to judge, so it cannot be combined with `--materials none`. It also only sees models that actually go through Blender: a model whose GLB is already up to date is never re-examined, so switching modes on an existing conversion wants `--force`. The summary says how many were left out, per pack:
+`drop` and `fill-or-drop` need materials to judge, so neither can be combined with `--materials none`; that flag turns off the external-materials path entirely, so nothing would ever bind a texture and `drop` would delete every model outright, whereas `fill` and `keep` are harmless no-ops there. `--untextured` also only sees models that actually go through Blender: a model whose GLB is already up to date is never re-examined, so switching modes on an existing conversion wants `--force`. The summary says how many were left out, per pack:
 
 ```
 Untextured 187 model(s) not written, no material bound a texture
@@ -430,6 +430,8 @@ A `bind` entry's `material` and, optionally, `model` are glob patterns too, but 
 ```bash
 python synty_convert.py --scan-materials --untextured keep --scan-report scan.json --packs PolygonFantasyKingdom
 ```
+
+That workflow uses `keep` on purpose, so it never assesses binding health: `keep` never hands the worker a binding table to fire against, so a scan run this way reports no `DEAD` lines and says as much rather than staying silent. Judge whether the table's bindings actually fire with a separate `--untextured fill --scan-materials` pass instead.
 
 **Three warnings guard the table against rotting** as a pack is updated. A `bind` entry that never matched a model and material together is reported as `DEAD`, naming the rule so it can be fixed or removed rather than sitting there doing nothing:
 

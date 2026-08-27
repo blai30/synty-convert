@@ -531,7 +531,7 @@ def transparency_of(record):
     return None
 
 
-def flavor_fill(context, source, material_name):
+def flavor_fill(context, source, material_name, warnings):
     """The declared default for a material that resolved to no texture of its own.
 
     Shaped exactly like resolve_texture's return so everything downstream, the canonical
@@ -547,11 +547,16 @@ def flavor_fill(context, source, material_name):
     chosen = (declared.get("sets") or {})[binding["flavor"]]
     member = chosen["default"]
     relative = member.replace("/", os.sep)
-    candidate = os.path.join(context.get("output_root", ""), relative)
+    output_root = context.get("output_root", "")
+    candidate = os.path.join(output_root, relative)
+    exists = os.path.exists(candidate)
     # Mirrors resolve_texture: an output pack that does not exist yet means this is a scan,
     # and claiming a mirrored path that is not on disk would put a phantom file into the
-    # scan report that pack authors read.
-    return {"texture": candidate if os.path.exists(candidate) else None,
+    # scan report that pack authors read. Only warn once there is an output pack to have
+    # failed to mirror into.
+    if not exists and output_root and os.path.isdir(output_root):
+        warnings.append(f"flavor default texture not mirrored yet: {relative}")
+    return {"texture": candidate if exists else None,
             "texture_source": os.path.join(context.get("source_root", ""), relative),
             "reference": None, "method": "flavor", "score": None,
             "flavor": binding["flavor"], "binding": binding["material"],
@@ -587,7 +592,7 @@ def resolve_materials(context, source, warnings):
         # Last, so a texture the FBX actually named always wins over a declared default,
         # and so a mask promoted to colour above is not overwritten by one.
         if not (record["channels"].get("albedo") or {}).get("texture_source"):
-            filled = flavor_fill(context, source, info["source"])
+            filled = flavor_fill(context, source, info["source"], warnings)
             if filled:
                 record["channels"]["albedo"] = filled
                 if filled["cutout"]:

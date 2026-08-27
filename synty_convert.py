@@ -487,7 +487,7 @@ def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
     return written
 
 
-def report_materials(totals, contexts):
+def report_materials(totals, contexts, judge_bindings=True):
     """Print how every texture reference resolved, so heuristic matches can be reviewed.
 
     Also names the flavor sets a pack declares, what filled from them, and any binding that
@@ -497,6 +497,12 @@ def report_materials(totals, contexts):
     beyond cosmetics: this report is the tool used to author flavor sets for new packs, and
     a curated table in material_overrides.json that silently stops matching is the main way
     these files rot.
+
+    A DEAD verdict is an absence claim, and only a run that could have seen a binding fire
+    is entitled to make one: `keep` and `drop` never hand the worker a binding table at all,
+    and an incremental run only examined the models it actually reconverted. `judge_bindings`
+    tells this function which kind of run it was; when it is false the DEAD check is skipped
+    entirely rather than printed on evidence that was never gathered.
     """
     if not any(totals.materials.values()):
         return
@@ -555,11 +561,15 @@ def report_materials(totals, contexts):
         # nothing in this pack ever needs, and either way a human should look at it rather
         # than the table quietly doing nothing forever.
         bindings = ((contexts.get(pack) or {}).get("materials") or {}).get("bind") or []
-        for binding in bindings:
-            if (binding["model"], binding["material"]) not in fired:
-                print(f"     DEAD     binding '{binding['material']}' on model "
-                      f"'{binding['model']}' matched nothing; remove it from "
-                      f"material_overrides.json or fix its glob")
+        if judge_bindings:
+            for binding in bindings:
+                if (binding["model"], binding["material"]) not in fired:
+                    print(f"     DEAD     binding '{binding['material']}' on model "
+                          f"'{binding['model']}' matched nothing; remove it from "
+                          f"material_overrides.json or fix its glob")
+        elif bindings:
+            print(f"     binding health not assessed this run; rerun with "
+                  f"--untextured fill --force to judge it")
         for entry, channel, found in sorted(asked, key=lambda item: -item[0]["used_by"]):
             # A trimmed match dropped tokens to find its winner, so it is a guess like any
             # other heuristic and belongs in front of the reader, not folded into the exact count.
@@ -690,9 +700,10 @@ def main():
     output_root = args.dst.resolve()
     if not source_root.is_dir():
         sys.exit(f"Source directory not found: {source_root}")
-    if args.untextured != "keep" and args.materials == "none":
-        # --materials none strips every material, so nothing would bind a texture, nothing
-        # could be filled, and a run that drops would write nothing at all.
+    if args.untextured in ("drop", "fill-or-drop") and args.materials == "none":
+        # --materials none turns off the external-materials path entirely, so
+        # rebuild_materials never runs and flavor_fill can never fire; fill and keep are
+        # harmless no-ops there, but drop would delete every model outright.
         sys.exit(f"--untextured {args.untextured} needs materials to judge; "
                  f"it cannot be used with --materials none.")
     if args.scan_report and not args.scan_materials:
@@ -741,13 +752,18 @@ def main():
         convert_all(blender, jobs, options, contexts,
                     max(1, min(args.workers, len(jobs))), totals, args.quiet)
 
+    # A DEAD line claims a binding matched nothing. Only a run that could have seen it fire
+    # is entitled to say so: keep and drop never hand the worker a binding table, and an
+    # incremental run only examined the models it reconverted.
+    judge = args.untextured in ("fill", "fill-or-drop") and not totals.skipped
+
     if args.scan_materials:
         if args.scan_report:
             args.scan_report.parent.mkdir(parents=True, exist_ok=True)
             args.scan_report.write_text(
                 json.dumps({"models": totals.scanned}, indent=2) + "\n", encoding="utf-8")
             print(f"  wrote {args.scan_report} ({len(totals.scanned)} models)")
-        report_materials(totals, contexts)
+        report_materials(totals, contexts, judge)
         print(f"\nScanned {totals.converted} files in {time.monotonic() - started:.1f}s. "
               f"Nothing was written.")
         sys.exit(1 if totals.failed else 0)
@@ -760,7 +776,7 @@ def main():
               f"examined,\n  which means any untextured ones among them are still in the output."
               f"\n  Rerun with --force to apply --untextured {args.untextured} across the whole tree.")
     report_scale(totals)
-    report_materials(totals, contexts)
+    report_materials(totals, contexts, judge)
     if args.split_heads:
         # Only worth saying when names were given: without them most files are props and
         # holding no character is the expected answer, not a problem.
