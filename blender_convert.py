@@ -554,7 +554,7 @@ def flavor_fill(context, source, material_name):
             "texture_source": os.path.join(context.get("source_root", ""), relative),
             "reference": None, "method": "flavor", "score": None,
             "flavor": binding["flavor"], "binding": binding["material"],
-            "member": member}
+            "binding_model": binding["model"], "member": member}
 
 
 def resolve_materials(context, source, warnings):

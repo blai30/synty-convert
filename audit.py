@@ -101,8 +101,29 @@ def audit_manifests(root, dst, res_prefix, failures, stats):
     for path in sorted(root.rglob("materials.json")):
         stats["manifests"] += 1
         manifest = json.loads(path.read_text(encoding="utf-8"))
+        by_name = {}
+        for entry in manifest["materials"]:
+            if entry["name"] in by_name:
+                failures["two materials share a name"].append(f"{path}: {entry['name']}")
+            by_name[entry["name"]] = entry
         for entry in manifest["materials"]:
             stats["materials"] += 1
+            base = entry.get("variant_of")
+            if base is not None:
+                stats["variants"] += 1
+                if base not in by_name:
+                    failures["variant_of names no entry in the manifest"].append(
+                        f"{path}: {entry['name']} -> {base}")
+                else:
+                    differs = {key for key in set(entry) | set(by_name[base])
+                               if entry.get(key) != by_name[base].get(key)}
+                    # A variant is its base wearing a different texture. Anything else
+                    # differing means the copy picked up something it should not have.
+                    allowed = {"name", "used_by", "variant_of", "source_names",
+                               "albedo_texture", "reference", "match"}
+                    if differs - allowed:
+                        failures["variant differs from its base beyond its texture"].append(
+                            f"{path}: {entry['name']} ({sorted(differs - allowed)})")
             if not entry.get("albedo_texture") and not entry.get("albedo_color"):
                 failures["material has neither texture nor colour"].append(f"{path}: {entry['name']}")
             if not entry.get("albedo_texture"):
@@ -151,7 +172,8 @@ def main():
     print(f"models {stats['models']}, image references {stats['images']} "
           f"pointing at {len(stats['textures'])} distinct texture files")
     print(f"manifests {stats['manifests']}, materials {stats['materials']} "
-          f"({stats['materials_without_texture']} colour only), tres {stats['tres']}")
+          f"({stats['materials_without_texture']} colour only, "
+          f"{stats['variants']} swappable flavor variants), tres {stats['tres']}")
     if stats["emission_texture"] or stats["normal_texture"]:
         print(f"extra maps: {stats['emission_texture']} emission, {stats['normal_texture']} normal")
     if stats["primitives_without_material"]:

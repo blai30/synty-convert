@@ -23,6 +23,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -78,6 +79,11 @@ class Totals:
     lods: dict = field(default_factory=dict)
     foliage: dict = field(default_factory=dict)
     untextured: dict = field(default_factory=dict)
+    # Flavor fills counted per model, before merging. A filled material renames itself after
+    # its new texture and merges with any identically-named one that resolved normally, so
+    # by the time totals.materials exists the fill may be invisible, and which record
+    # survives depends on which worker finished first.
+    filled: collections.Counter = field(default_factory=collections.Counter)
     # Raw per-model scan records, kept only when --scan-report asks for them.
     scanned: list = field(default_factory=list)
     spans: dict = field(default_factory=lambda: collections.defaultdict(list))
@@ -258,50 +264,65 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             ratio = 100.0 * (1 - totals.dst_bytes / max(totals.src_bytes, 1))
             print(f"  [{done}/{total}] {human(totals.src_bytes)} -> {human(totals.dst_bytes)} ({ratio:.1f}% smaller)")
 
+    # Every worker thread calls this with its own results, and each accumulation below is a
+    # read-modify-write that is not atomic. The work inside is trivial next to a Blender
+    # conversion, so one lock costs nothing and makes every counter here trustworthy.
+    lock = threading.Lock()
+
     def record(result):
         nonlocal done
-        done += 1
-        if not result.get("ok"):
-            totals.failed += 1
-            totals.failures.append((result.get("src"), result.get("error", "").strip().splitlines()[-1:]))
-            print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
-            return
-        if options.get("scan_report"):
-            totals.scanned.append({"src": result.get("src"), "pack": result.get("pack", ""),
-                                   "materials": result.get("materials", [])})
-        if result.get("untextured"):
-            # Nothing was written and no material survives to describe, so this contributes
-            # neither bytes to the totals nor an entry to the pack's manifest. Its warnings
-            # are the unresolved references that got it dropped, which the summary line
-            # already says, so they stay out of a list meant for what shipped.
-            totals.untextured[result["src"]] = result.get("pack", "")
+        with lock:
+            done += 1
+            if not result.get("ok"):
+                totals.failed += 1
+                totals.failures.append((result.get("src"), result.get("error", "").strip().splitlines()[-1:]))
+                print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
+                return
+            if options.get("scan_report"):
+                totals.scanned.append({"src": result.get("src"), "pack": result.get("pack", ""),
+                                       "materials": result.get("materials", [])})
+            if result.get("untextured"):
+                # Nothing was written and no material survives to describe, so this contributes
+                # neither bytes to the totals nor an entry to the pack's manifest. Its warnings
+                # are the unresolved references that got it dropped, which the summary line
+                # already says, so they stay out of a list meant for what shipped.
+                totals.untextured[result["src"]] = result.get("pack", "")
+                tick()
+                return
+            totals.converted += 1
+            totals.src_bytes += result["src_bytes"]
+            totals.dst_bytes += result["dst_bytes"]
+            pack = totals.materials.setdefault(result.get("pack", ""), {})
+            for material in result.get("materials", []):
+                entry = pack.setdefault(material["name"], dict(material, used_by=0, sources=set()))
+                entry["used_by"] += 1
+                entry["sources"].add(material["source"])
+            # Counted here, straight off this model's own records, rather than off
+            # totals.materials: the setdefault above can let a fill merge into and disappear
+            # behind a normally-resolved record of the same name, and which one wins depends on
+            # thread scheduling. Reporting from that merged dict would be nondeterministic.
+            for material in result.get("materials", []):
+                albedo = (material.get("channels") or {}).get("albedo") or {}
+                if albedo.get("method") == "flavor":
+                    totals.filled[(result.get("pack", ""), albedo["binding_model"],
+                                   albedo["binding"], material["name"], albedo["flavor"])] += 1
+            if result.get("split"):
+                totals.split[result["src"]] = result["split"]
+            if result.get("dropped_lods"):
+                totals.lods[result["src"]] = result["dropped_lods"]
+            if result.get("foliage"):
+                totals.foliage[result["src"]] = result["foliage"]
+            bounds = (result.get("summary") or {}).get("bounds")
+            if bounds:
+                totals.spans[result.get("pack", "")].append(max(bounds[i + 3] - bounds[i] for i in range(3)))
+            if result["dst_bytes"] >= result["src_bytes"]:
+                totals.grew.append((result["src"], result["src_bytes"], result["dst_bytes"]))
+            for warning in result.get("warnings", []):
+                totals.warnings.append(f"{Path(result['src']).name}: {warning}")
+            check = result.get("verify")
+            if check and not check.get("ok"):
+                totals.warnings.append(f"{Path(result['src']).name}: verification mismatch {check}")
             tick()
-            return
-        totals.converted += 1
-        totals.src_bytes += result["src_bytes"]
-        totals.dst_bytes += result["dst_bytes"]
-        pack = totals.materials.setdefault(result.get("pack", ""), {})
-        for material in result.get("materials", []):
-            entry = pack.setdefault(material["name"], dict(material, used_by=0, sources=set()))
-            entry["used_by"] += 1
-            entry["sources"].add(material["source"])
-        if result.get("split"):
-            totals.split[result["src"]] = result["split"]
-        if result.get("dropped_lods"):
-            totals.lods[result["src"]] = result["dropped_lods"]
-        if result.get("foliage"):
-            totals.foliage[result["src"]] = result["foliage"]
-        bounds = (result.get("summary") or {}).get("bounds")
-        if bounds:
-            totals.spans[result.get("pack", "")].append(max(bounds[i + 3] - bounds[i] for i in range(3)))
-        if result["dst_bytes"] >= result["src_bytes"]:
-            totals.grew.append((result["src"], result["src_bytes"], result["dst_bytes"]))
-        for warning in result.get("warnings", []):
-            totals.warnings.append(f"{Path(result['src']).name}: {warning}")
-        check = result.get("verify")
-        if check and not check.get("ok"):
-            totals.warnings.append(f"{Path(result['src']).name}: verification mismatch {check}")
-        tick()
 
     batches = chunk(jobs, workers)
     with ThreadPoolExecutor(max_workers=len(batches)) as pool:
@@ -460,8 +481,17 @@ def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
     return written
 
 
-def report_materials(totals):
-    """Print how every texture reference resolved, so heuristic matches can be reviewed."""
+def report_materials(totals, contexts):
+    """Print how every texture reference resolved, so heuristic matches can be reviewed.
+
+    Also names the flavor sets a pack declares, what filled from them, and any binding that
+    matched nothing. A flavor fill never carries a `reference`, since nothing in the FBX
+    asked for the texture it received, so it is invisible to the reference-keyed bucketing
+    below and has to be found by its `method` instead. Making these visible here matters
+    beyond cosmetics: this report is the tool used to author flavor sets for new packs, and
+    a curated table in material_overrides.json that silently stops matching is the main way
+    these files rot.
+    """
     if not any(totals.materials.values()):
         return
     print("\nMaterials")
@@ -477,17 +507,53 @@ def report_materials(totals):
                  and not (name == "alpha" and channel_of(entry, name).get("reference")
                           == channel_of(entry, "albedo").get("reference"))]
         counts = collections.Counter(found.get("method") or "unresolved" for _, _, found in asked)
-        untextured = sum(1 for e in materials.values() if not channel_of(e, "albedo").get("reference"))
+        # Keyed on the binding pattern, the observed material and the flavor it drew from,
+        # so the fill lines below can name all three and the DEAD check can tell which
+        # bindings in material_overrides.json actually fired. Built from totals.filled, not
+        # from materials.values(): a filled material renames itself after its texture and can
+        # merge with an identically-named record that resolved normally, at which point
+        # whichever arrived first wins the merge and the fill disappears. totals.filled was
+        # counted per model before that merge happened, so it still has every fill.
+        filled = collections.Counter()
+        # A binding is identified by its model glob and its material glob together, not the
+        # material glob alone: normalize_bindings expects configs where a narrow model-scoped
+        # rule sits above a broader one sharing the same material glob, and the material
+        # string alone cannot tell those two bindings apart.
+        fired = set()
+        for (fill_pack, binding_model, binding, name, flavor), count in totals.filled.items():
+            if fill_pack == pack:
+                filled[(binding, name, flavor)] += count
+                fired.add((binding_model, binding))
+        # A flavor fill leaves `reference` empty but does carry a `texture`, so it must be
+        # excluded here too or a material the pack just fixed still reads as untextured.
+        untextured = sum(1 for e in materials.values()
+                         if not channel_of(e, "albedo").get("reference")
+                         and not channel_of(e, "albedo").get("texture"))
         extra = collections.Counter(name for e in materials.values() for name in
                                     ("emission", "normal") if channel_of(e, name).get("texture"))
         print(f"  {pack}: {len(materials)} materials  "
               f"({counts['exact'] + counts['normalized']} exact, {counts['override']} override, "
               f"{counts['tokens'] + counts['trimmed']} heuristic, {counts['unresolved']} unresolved, "
-              f"{untextured} untextured)")
+              f"{len(filled)} filled, {untextured} untextured)")
         if extra:
             print("     " + ", ".join(f"{count} carry an {name} map" if name == "emission"
                                       else f"{count} carry a {name} map"
                                       for name, count in sorted(extra.items())))
+        sets = ((contexts.get(pack) or {}).get("materials") or {}).get("sets") or {}
+        for name in sorted(sets):
+            print(f"     flavor   {name}  -> {len(sets[name]['members'])} textures, "
+                  f"default {Path(sets[name]['default']).name}")
+        for (binding, name, flavor), count in sorted(filled.items(), key=lambda i: -i[1]):
+            print(f"     filled   {binding:<24} -> {name}  ({count} files, flavor {flavor})")
+        # A binding that never fired is either a typo'd model/material glob or a set that
+        # nothing in this pack ever needs, and either way a human should look at it rather
+        # than the table quietly doing nothing forever.
+        bindings = ((contexts.get(pack) or {}).get("materials") or {}).get("bind") or []
+        for binding in bindings:
+            if (binding["model"], binding["material"]) not in fired:
+                print(f"     DEAD     binding '{binding['material']}' on model "
+                      f"'{binding['model']}' matched nothing; remove it from "
+                      f"material_overrides.json or fix its glob")
         for entry, channel, found in sorted(asked, key=lambda item: -item[0]["used_by"]):
             # A trimmed match dropped tokens to find its winner, so it is a guess like any
             # other heuristic and belongs in front of the reader, not folded into the exact count.
@@ -675,7 +741,7 @@ def main():
             args.scan_report.write_text(
                 json.dumps({"models": totals.scanned}, indent=2) + "\n", encoding="utf-8")
             print(f"  wrote {args.scan_report} ({len(totals.scanned)} models)")
-        report_materials(totals)
+        report_materials(totals, contexts)
         print(f"\nScanned {totals.converted} files in {time.monotonic() - started:.1f}s. "
               f"Nothing was written.")
         sys.exit(1 if totals.failed else 0)
@@ -688,7 +754,7 @@ def main():
               f"examined,\n  which means any untextured ones among them are still in the output."
               f"\n  Rerun with --force to apply --untextured {args.untextured} across the whole tree.")
     report_scale(totals)
-    report_materials(totals)
+    report_materials(totals, contexts)
     if args.split_heads:
         # Only worth saying when names were given: without them most files are props and
         # holding no character is the expected answer, not a problem.
