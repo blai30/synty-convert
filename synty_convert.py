@@ -76,6 +76,8 @@ class Totals:
     lods: dict = field(default_factory=dict)
     foliage: dict = field(default_factory=dict)
     untextured: dict = field(default_factory=dict)
+    # Raw per-model scan records, kept only when --scan-report asks for them.
+    scanned: list = field(default_factory=list)
     spans: dict = field(default_factory=lambda: collections.defaultdict(list))
 
 
@@ -246,6 +248,9 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
             totals.failures.append((result.get("src"), result.get("error", "").strip().splitlines()[-1:]))
             print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
             return
+        if options.get("scan_report"):
+            totals.scanned.append({"src": result.get("src"), "pack": result.get("pack", ""),
+                                   "materials": result.get("materials", [])})
         if result.get("untextured"):
             # Nothing was written and no material survives to describe, so this contributes
             # neither bytes to the totals nor an entry to the pack's manifest. Its warnings
@@ -506,6 +511,10 @@ def main():
                              "no mesh, are unaffected")
     parser.add_argument("--scan-materials", action="store_true",
                         help="report how texture references resolve, without converting anything")
+    parser.add_argument("--scan-report", type=Path, default=None, metavar="PATH",
+                        help="with --scan-materials, also write every model's raw material "
+                             "records to PATH as JSON; this is what the per-pack override "
+                             "tables are authored from")
     parser.add_argument("--dry-run", action="store_true", help="list what would happen and exit")
     parser.add_argument("--quiet", action="store_true", help="only print the final summary")
     parser.add_argument("--blender", default=None, help="path to the Blender executable")
@@ -519,6 +528,8 @@ def main():
         # --materials none strips every material, so nothing would bind a texture and the
         # run would write nothing at all.
         sys.exit("--skip-untextured needs materials to judge; it cannot be used with --materials none.")
+    if args.scan_report and not args.scan_materials:
+        sys.exit("--scan-report only has anything to write during --scan-materials.")
 
     jobs, copies = discover(source_root, output_root, args.packs)
     if not jobs and not copies:
@@ -556,11 +567,17 @@ def main():
         options = {"verify": args.verify, "vertex_colors": args.vertex_colors,
                    "animations": args.animations, "materials": args.materials,
                    "lods": args.lods, "scan_only": args.scan_materials,
+                   "scan_report": bool(args.scan_report),
                    "skip_untextured": args.skip_untextured}
         convert_all(blender, jobs, options, contexts,
                     max(1, min(args.workers, len(jobs))), totals, args.quiet)
 
     if args.scan_materials:
+        if args.scan_report:
+            args.scan_report.parent.mkdir(parents=True, exist_ok=True)
+            args.scan_report.write_text(
+                json.dumps({"models": totals.scanned}, indent=2) + "\n", encoding="utf-8")
+            print(f"  wrote {args.scan_report} ({len(totals.scanned)} models)")
         report_materials(totals)
         print(f"\nScanned {totals.converted} files in {time.monotonic() - started:.1f}s. "
               f"Nothing was written.")
