@@ -280,7 +280,13 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
                 print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
                 return
             if options.get("scan_report"):
+                # Bounds travel with the record because authoring a scale override needs a
+                # per-model size and nothing else reports one: report_scale only prints a
+                # per-pack median, and a pack whose models disagree about their unit cannot
+                # be corrected from a median. These are world space, so a node scale the
+                # geometry already carries is included, which reading the mesh alone misses.
                 totals.scanned.append({"src": result.get("src"), "pack": result.get("pack", ""),
+                                       "bounds": (result.get("summary") or {}).get("bounds"),
                                        "materials": result.get("materials", [])})
             if result.get("untextured"):
                 # Nothing was written and no material survives to describe, so this contributes

@@ -28,6 +28,41 @@
       "SM_Env_Rubble_Stone_02": 100
     }
   },
+  "POLYGON_War_SourceFiles_v4": {
+    "_comment": "This pack has no consistent unit at all, so it gets no pack-wide 'scale' and instead names only what needs correcting; anything unlisted is left untouched. That direction matters: a model this file does not mention stays too small, which the run already warns about and which is obvious on screen, where a wrongly listed one would be a hundred times too big. The environment, building and prop categories are 408 of the 543 models and are authored in meters almost without exception: only nine of them are already correct, and each is unmistakable, a 16 m state building, a 30 m ocean tile, a 12 m radio tower. Characters, items, parachutes and all but one vehicle are already in centimeters and so are absent below. Weapons are listed one at a time because that category spans a factor of seven thousand, from 0.0016 to 11.06 units, and every scale from 0.1 to 100 appears in it. Each weapon was matched against the real thing it depicts and the fit is exact: the Thompson lands at 0.83 m against a real 0.81, the StG44 at 0.94 against 0.94, the Kar98k at 1.10 against 1.11, the bazooka at 1.38 against 1.37, the M2 Browning at 1.65 against 1.65, the MP40 at 0.84 against 0.83 and the Lee Enfield at 1.13 against 1.13. Verified across all 543 models: none ends up under 5 cm and only the two large boats exceed 100 m, at 223 m and 154 m, which is what they are.",
+    "_uncertain": "SM_Bld_Bunker_Small_01 is the one entry decided by its name rather than by measurement. At the x100 its family takes it would be 40.8 m, against 7.6 m for the plain SM_Bld_Bunker_01, so a 'Small' bunker would be five times the size of the standard one; x10 puts it at 4.08 m instead. SM_Env_Road_Dirt_Swerve_01 and _02 reach 41.9 m and SM_Env_Beach_Background_01 reaches 51.8 m, both larger than their neighbours but not implausible for a background piece, so they were left on the family scale.",
+    "files": {
+      "SM_Wep_Russian_Scope_*": 0.1,
+      "SM_Wep_*Bayonet_01": 0.1,
+      "SM_Wep_FlameThrower_*": 0.1,
+      "SM_Wep_German_SubmachineGun_01": 0.1,
+      "SM_Wep_Russian_Rifle_01": 0.1,
+      "SM_Wep_American_Rifle_Clip_01": 10,
+      "SM_Wep_German_Pistol_01": 10,
+      "SM_Wep_*Scope_Short_01": 10,
+      "SM_Wep_*Scope_Long_01": 10,
+      "SM_Wep_Ammo_BulletLarge_01": 10,
+      "SM_Wep_Mortar_01": 10,
+      "SM_Wep_Russian_SubMachineGun_01": 10,
+      "SM_Wep_American_HeavyMachineGun_Tripod_01": 10,
+      "SM_Wep_German_RocketLauncher_01": 10,
+      "SM_Wep_*Grenade_01": 1,
+      "SM_Wep_British_Rifle_01": 1,
+      "SM_Wep_Torpedo_01": 1,
+      "SM_Wep_*": 100,
+      "SM_Env_Ocean_Tile_01": 1,
+      "SM_Bld_State_Building*": 1,
+      "SM_Prop_Stretcher_01": 1,
+      "SM_Prop_Eagle_0*": 1,
+      "SM_Prop_Ship_Mine_01": 1,
+      "SM_Prop_Radio_Tower_01": 1,
+      "SM_Bld_Bunker_Small_01": 10,
+      "SM_Env_*": 100,
+      "SM_Bld_*": 100,
+      "SM_Prop_*": 100,
+      "SM_Veh_Landing_Craft_01": 100
+    }
+  },
   "POLYGON_Pirate_Pack_SourceFiles_v3": {
     "_comment": "Every one of this pack's 542 models is authored in meters and every file declares centimeters, so the whole pack converts a hundred times too small and there are no exceptions to carve out: measured across the converted output the largest model is 0.657 m and the smallest 0.002 m, a single unbroken population with nothing above twenty times the median. SM_Prop_Barrel_01 arrives 0.009 m across and becomes 0.9 m, SM_Bld_Cuba_Arch_01 becomes 4.7 m and SM_Veh_Boat_Warship_01_Hull becomes 39.7 m.",
     "scale": 100
