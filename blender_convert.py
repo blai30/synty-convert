@@ -695,27 +695,6 @@ def distinct_materials(resolved):
     return list(records.values())
 
 
-def flavor_fills(resolved):
-    """Every flavor fill this model took, read before canonical names are deduplicated.
-
-    distinct_materials collapses two materials that settled on the same canonical name, and
-    when one of them was filled while the other resolved from its own reference, whichever
-    Blender listed first wins and the loser's fill marker goes with it. Reading fills here,
-    off the pre-dedup records, keeps a fill visible even where the material it produced
-    merges into a twin that never needed filling.
-    """
-    fills = {}
-    for entry in resolved.values():
-        albedo = entry["channels"].get("albedo") or {}
-        if albedo.get("method") != "flavor":
-            continue
-        # One model filling the same binding twice is still one model in the report.
-        fills[(albedo["binding_model"], albedo["binding"], entry["name"],
-               albedo["flavor"])] = None
-    return [{"binding_model": model, "binding": binding, "name": name, "flavor": flavor}
-            for model, binding, name, flavor in fills]
-
-
 def material_indices(mesh):
     """The material slot each polygon is assigned to."""
     buffer = [0] * len(mesh.polygons)
@@ -731,7 +710,7 @@ def rebuild_materials(context, source, warnings):
     distinct_materials below deduplicates canonical names and can carry one away silently.
     """
     resolved = resolve_materials(context, source, warnings)
-    fills = flavor_fills(resolved)
+    fills = material_flavors.flavor_fills(resolved)
     # Capture slot assignments, then rebuild from scratch so names cannot collide. Emptying
     # a mesh's slots also resets every polygon's material_index to zero, so the per-face
     # assignment has to be carried across by hand; without it a multi-material mesh
@@ -1091,7 +1070,7 @@ def convert(job, options, packs):
         resolved = resolve_materials(context, src, warnings)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "src_bytes": os.path.getsize(src),
                 "dst_bytes": 0, "materials": distinct_materials(resolved),
-                "fills": flavor_fills(resolved), "warnings": warnings,
+                "fills": material_flavors.flavor_fills(resolved), "warnings": warnings,
                 "summary": scene_summary(), "normalized_scale": None}
 
     if options.get("vertex_colors") != "keep":

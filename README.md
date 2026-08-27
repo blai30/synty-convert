@@ -327,7 +327,7 @@ Sometimes the texture a pack asks for is one **another pack** ships. Synty's bio
 
 That other pack has to be converted too, since the material points at its mirrored copy under `assets/`. Convert only one of the pair and the run says so and leaves the material colour only.
 
-The file ships with 48 mappings covering 14 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. A working file's name is not evidence of what it holds: `RopeBridge.png` is the atlas for 45 Meadow Forest props, none of which is a rope bridge, because the artist named the file in the Tropical Jungle scene that does have one. If you own a pack that is not listed, run `--scan-materials` and add what you find.
+The file ships with 83 mappings covering 19 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. A working file's name is not evidence of what it holds: `RopeBridge.png` is the atlas for 45 Meadow Forest props, none of which is a rope bridge, because the artist named the file in the Tropical Jungle scene that does have one. If you own a pack that is not listed, run `--scan-materials` and add what you find.
 
 What is deliberately **not** mapped here is anything ambiguous between several shipped candidates: guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one. References to packs you do not own, like `PolygonAncientWorlds_Texture_01.png`, have no counterpart to find and stay colour-only regardless. `Wall_01.psd` in FantasyKingdom used to be the example of the first kind, since it could be any of five shipped wall textures; it is mapped now, to `Wall_Brick_01.png`, because that stopped being a guess once `Wall_Brick_01` became the curated default of FantasyKingdom's `Wall` flavor set, the same texture a bare wall material falls back to on its own. See [Flavor sets and default textures](#flavor-sets-and-default-textures) for how that default is chosen, and for the general case of a material naming no texture at all rather than an ambiguous one.
 
@@ -367,23 +367,28 @@ What drop and fill-or-drop do catch, which is worth knowing before you use them,
 `drop` and `fill-or-drop` need materials to judge, so neither can be combined with `--materials none`; that flag turns off the external-materials path entirely, so nothing would ever bind a texture and `drop` would delete every model outright, whereas `fill` and `keep` are harmless no-ops there. `--untextured` also only sees models that actually go through Blender: a model whose GLB is already up to date is never re-examined, so switching modes on an existing conversion wants `--force`. The summary says how many were left out, per pack:
 
 ```
-Untextured 187 model(s) not written, no material bound a texture
+Untextured 380 model(s) not written, no material bound a texture
                2  ANIMATION_Base_Locomotion_SourceFiles_v3
                9  POLYGON_BattleRoyale_Source_Files_v4
-              47  POLYGON_Construction_SourceFiles_v3
-               8  POLYGON_Dungeons_Realms_SourceFiles_v2
+             109  POLYGON_Casino_SourceFiles_v4
+               4  POLYGON_Construction_SourceFiles_v3
+               8  POLYGON_Dungeons_Realms_SourceFiles_v5
+              24  POLYGON_Gang_Warfare_Source_Files_v4
+              31  POLYGON_Horror_Carnival_SourceFiles_v3
               18  POLYGON_Military_SourceFiles_v4
                7  POLYGON_NatureBiomes_AridDesert_SourceFiles_v2
                8  POLYGON_NatureBiomes_MeadowForest_SourceFiles_v2
               22  POLYGON_NatureBiomes_TropicalJungle_SourceFiles_v2
                4  POLYGON_Nature_Source_Files_v2
                7  POLYGON_SciFi_City_SourceFiles_v5
+              52  POLYGON_Street_Racer_SourceFiles_v3
+              20  POLYGON_War_SourceFiles_v4
                5  POLYGON_Western_Frontier_SourceFiles_v4
               31  PolygonFantasyKingdom
               19  PolygonSciFiSpace
 ```
 
-That is `--untextured fill-or-drop`, 187 of 10740 models, or 1.7%, after filling has already found a home for most of them. `--untextured drop` alone, with no filling, would remove 587 of the same 10740, or 5.5%: the gap between the two is exactly what flavor sets buy you.
+That is `--untextured fill-or-drop`, 380 of 15506 models, or 2.5%, after filling has already found a home for most of them. `--untextured drop` alone, with no filling, would remove 929 of the same 15506, or 6.0%: the gap between the two, 549 models, is exactly what flavor sets buy you.
 
 ## Flavor sets and default textures
 
@@ -478,7 +483,7 @@ An FBX states the unit its geometry is in, and the converter converts from it. S
 The run says so:
 
 ```
-POLYGON_Dungeon_Pack_SourceFiles_v2: the median model is 0.0245 m across, which means this
+POLYGON_Dungeon_Pack_SourceFiles_v3: the median model is 0.0245 m across, which means this
 pack's FBX declare a unit their geometry is not in. Add a scale for it to
 scale_overrides.json and reconvert with --force.
 ```
@@ -487,7 +492,7 @@ scale_overrides.json and reconvert with --force.
 
 ```json
 {
-  "POLYGON_Dungeon_Pack_SourceFiles_v2": {
+  "POLYGON_Dungeon_Pack_SourceFiles_v3": {
     "scale": 100,
     "files": {
       "SM_Item_Chr_*": 1
@@ -580,6 +585,9 @@ Its FBX binds no texture, so the alpha cutout that shapes each leaf card has not
 
 **A building or prop is flat white or flat grey, with no texture anywhere on it**
 Its FBX bound no texture to begin with, so there was nothing to carry across, and by default the converter already tries to fix it. Check the model's materials in `materials/<pack>/materials.json`: an entry with `albedo_color` and no `albedo_texture` still has no flavor set covering it. Where the missing atlas is a single obvious texture reference, name it in [texture_overrides.json](#fixing-unresolved-textures); where the choice is between several shipped alternatives, or the material references no file at all, add a set and a binding to [material_overrides.json](#flavor-sets-and-default-textures) instead. To leave what is still bare out of the output rather than fix it, convert with [`--untextured drop` or `fill-or-drop`](#filling-keeping-or-dropping-untextured-models).
+
+**`ASCII FBX files are not supported`**
+Not fixable here. Blender's importer reads binary FBX only, and Synty ships a handful of models in the ASCII variant by mistake: a binary file begins `Kaydara FBX Binary`, an ASCII one begins `; FBX 7.x.0 project file`. Across the full catalogue this is 21 models, 18 of them in Horror Carnival, and none of them ships a binary counterpart anywhere in its pack. The run names every one under its pack in the failure summary, and the rest of the pack converts normally. Re-export them as binary from a tool that can read ASCII FBX, or ask Synty for a corrected drop.
 
 **Godot is importing my source FBX**
 Keep `synty_packs_fbx/` outside your Godot project, or drop an empty `.gdignore` file in it.

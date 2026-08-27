@@ -122,6 +122,27 @@ def match_binding(bindings, model_stem, material_name):
     return None
 
 
+def flavor_fills(resolved):
+    """Every flavor fill one model took, read before canonical names are deduplicated.
+
+    The worker's ``distinct_materials`` collapses two materials that settled on the same
+    canonical name, and when one of them was filled while the other resolved from its own
+    reference, whichever Blender listed first wins and the loser's fill marker goes with it.
+    Reading fills off the pre-dedup records keeps a fill visible even where the material it
+    produced merges into a twin that never needed filling.
+    """
+    fills = {}
+    for entry in resolved.values():
+        albedo = (entry.get("channels") or {}).get("albedo") or {}
+        if albedo.get("method") != "flavor":
+            continue
+        # One model filling the same binding twice is still one model in the report.
+        fills[(albedo["binding_model"], albedo["binding"], entry["name"],
+               albedo["flavor"])] = None
+    return [{"binding_model": model, "binding": binding, "name": name, "flavor": flavor}
+            for model, binding, name, flavor in fills]
+
+
 def variants_of(member, sets):
     """The rest of the set this texture belongs to, or nothing when it belongs to none.
 

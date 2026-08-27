@@ -28,6 +28,10 @@
       "SM_Env_Rubble_Stone_02": 100
     }
   },
+  "POLYGON_Pirate_Pack_SourceFiles_v3": {
+    "_comment": "Every one of this pack's 542 models is authored in meters and every file declares centimeters, so the whole pack converts a hundred times too small and there are no exceptions to carve out: measured across the converted output the largest model is 0.657 m and the smallest 0.002 m, a single unbroken population with nothing above twenty times the median. SM_Prop_Barrel_01 arrives 0.009 m across and becomes 0.9 m, SM_Bld_Cuba_Arch_01 becomes 4.7 m and SM_Veh_Boat_Warship_01_Hull becomes 39.7 m.",
+    "scale": 100
+  },
   "POLYGON_Nature_Source_Files_v2": {
     "_comment": "SM_Plant_Grass_01 is 0.30 units across where the rest of the SM_Plant_Grass set is 82.",
     "files": {
