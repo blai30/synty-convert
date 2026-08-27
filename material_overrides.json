@@ -368,5 +368,139 @@
       { "model": "SM_Env_Bush_01", "material": "lambert1557", "flavor": "Atlas" },
       { "model": "SM_Prop_Crystal_Rock_*", "material": "Tomb:*", "flavor": "Atlas" }
     ]
+  },
+
+  "POLYGON_Pirate_Pack_SourceFiles_v3": {
+    "_verification": "The 72 lambert1 models are the pack's boats, masts, sails, rigging, guns and shipwrecks, none of them an excluded kind. SM_Veh_Boat_Warship_01_Hull spans U 0.047 to 0.570 V 0.008 to 0.880 over 13360 faces with 23 distinct colours and no black, and SM_Prop_Shipwreck_01, whose material names Texture_01.psd outright, spans U 0.011 to 0.570 V 0.010 to 0.880 over the same territory: the bare material and the one that asks for the atlas by name read the same island layout. Sampling gives weathered timber 113,106,76 on the hull and 87,73,63 on the wreck. SM_Veh_Boat_Large_Sails_01 collapses to the single point U 0.331 V 0.264 and reads canvas cream 193,175,151, which is what a sail is. initialShadingGroup2 sits on SM_Veh_Boat_Warship_01_Mast_02, whose _Pirate twin carries lambert1.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Textures/Texture_01_?.png"],
+        "default": "Texture_01_A.png"
+      }
+    },
+    "bind": [
+      { "model": "SM_Prop_Shipwreck_*", "material": "lambert1", "flavor": "Atlas" },
+      { "model": "SM_Veh_*", "material": "lambert1", "flavor": "Atlas" },
+      { "model": "SM_Veh_Boat_Warship_01_Mast_02", "material": "initialShadingGroup2", "flavor": "Atlas" }
+    ]
+  },
+
+  "POLYGON_Horror_Carnival_SourceFiles_v3": {
+    "_verification": "Every atlas material in this pack asks for PolygonHorrorCarnival_Texture_01, which ships only under Textures/Alts and only in numbered recolours, so texture_overrides.json carries the mapping and this set exists to offer the other two. _01 is the correct family and not merely the referenced one: SM_Prop_Barrel_02 spans U 0.057 to 0.175 V 0.179 to 0.256 and samples grey 90,90,88 on _01_A against pink 189,131,180 on _02_A. All twelve Alts share one island layout, edge correlation 0.950 to 0.991 over 66 pairs, but the set is held to the _01 triple to match how every other pack here is authored.",
+    "_uncertain": "lambert1 on SM_Building_Entrance_01 and SM_Prop_Light_Pole_02, lambert1863 on SM_Prop_Dunk_Tank_01, lambert1705 on SM_Prop_Rubbish_Bin_03 and Default_Material on SM_Prop_Ticket_02 reference nothing and were not probed, so they stay bare. The haunted house walls, carpets, tiles and wallpapers are tiling surfaces with many interchangeable candidates and no discriminator, so no default was chosen for them. FX_SunShaft_01 and FX_Sphere_Pivoted_01 are excluded by kind.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Alts/PolygonHorrorCarnival_Texture_01_?.png"],
+        "default": "PolygonHorrorCarnival_Texture_01_A.png"
+      }
+    },
+    "bind": []
+  },
+
+  "POLYGON_Casino_SourceFiles_v4": {
+    "_verification": "The atlas ships under Textures/Alts, so the plain PolygonCasino_Texture_01 the FBX asks for, and the ASHE, ASHEv2, Ashe_02 and Emerson artist names beside it, all resolve through texture_overrides.json. SM_Bld_Bar_Wall_01's PolygonCasino_MAT spans the narrow strip U 0.134 to 0.137 V 0.284 to 0.378 and samples a light grey 173,178,185 with no black, which is an atlas island rather than padding.",
+    "_uncertain": "SM_Bld_Casino_Wall_* carries lambert1 and A_Wall, whose UVs span the whole of 0 to 1 with 26 distinct colours and 5.9 and 13.3 percent black. A full frame UV means a tiling wall texture rather than an atlas lookup, and this pack ships fourteen HotelWall sheets, two VaultWall, three Wallpaper_Tex, eleven Tile_Tex, six Carpet_Tex, Brick_01, Concrete and Marble_Tex_01 with nothing to choose between them, so the whole wall family is left bare. PolygonShops_Walls_Texture_01, PolygonClub_Texture_01, PolygonShops_Texture_01 and Buildings_Diffuse_01 name packs this one borrowed from and were not traced.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Alts/PolygonCasino_Texture_01_?.png"],
+        "default": "PolygonCasino_Texture_01_A.png"
+      }
+    },
+    "bind": []
+  },
+
+  "POLYGON_War_SourceFiles_v4": {
+    "_verification": "PolygonWar_Texture.psd, its GoodVersion sibling and PolygonWAR_TEMP are authoring names for the shipped PolygonWar_Texture_01_A, mapped in texture_overrides.json; this set exists to offer _01_B and _01_C. SM_Bld_Barracks_01 spans U -0.003 to 0.488 V 0.228 to 0.740 over 1094 faces and samples weathered timber 129,124,119, with its doors at 179,173,164 cream and its glazing at 126,161,173 blue grey, and SM_Bld_Bunker_02 samples concrete 146,141,134. Nothing lands in black padding.",
+    "_uncertain": "This pack's numbered families do not separate under the edge correlation test used elsewhere: within a family it runs 0.853 to 0.991 and across families 0.803 to 0.984, so the two distributions overlap and the measurement cannot say whether _02, _03 and _04 are recolours of _01's layout or different sheets. The set is therefore held to the _01 triple, which is certainly a recolour triple. The per airframe plane textures, ME109, Stuka, Spitfire, p51, Ju52 and c47, map one to one onto the German fighter, dive bomber, British fighter, American fighter and the two transport sheets by aircraft identity alone; that is name evidence rather than measurement, so they are left unbound. The Tank_Camo_Testing sheets and diff.psd name nothing that shipped.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Textures/PolygonWar_Texture_01_?.png"],
+        "default": "PolygonWar_Texture_01_A.png"
+      }
+    },
+    "bind": []
+  },
+
+  "POLYGON_Street_Racer_SourceFiles_v3": {
+    "_verification": "Veh_Tex_Exp.psd is the unpainted vehicle atlas, read by 1323 models covering car bodies, SM_Veh_Attach parts and workshop props. The liveries are aligned variants of one layout rather than art per vehicle, which is the distinction the Military AirVehicle set got wrong: SM_Veh_Hatch_01's engine bay, U 0.078 to 0.177 V 0.182 to 0.325, samples an identical 101.1,95.1,95.1 on Veh_Tex_05_Race_Grey, on Veh_Tex_16_Pup and on the pack atlas, while the same model's body and doors shift from 73.2,77.2,78.6 to 92.6,74.2,79.1 between the two liveries. Shared trim identical, paint different, is what interchangeable liveries look like. Props confirm it from the other side: SM_Prop_GasCan_01 spans the small island U 0.102 to 0.134 V 0.204 to 0.227 and samples the same red 156,78,63 on every candidate, so the choice cannot hurt it. Race_Grey is the default because the numbering opens on Race_Purple rather than on a base colour, and the other liveries all ship as variants. The pack atlas is separately confirmed: SM_Prop_Barrier_Cone_01 samples cone orange 184,81,48 and SM_Env_BoatRamp_01 samples concrete 114,107,95, both with no black.",
+    "_uncertain": "The Pearl and Stripes liveries are left out of the set. Alignment was demonstrated between two numbered liveries and they follow the same Veh_Tex_NN naming, but no Pearl or Stripes sheet was probed against a model, so extending the set to them would be inference rather than measurement. PolygonStreetRacer_Texture_Test.psd, which three separate references name across 98 models, is an artist's working name that identifies no shipped sheet. GlassSHD is excluded by kind, as are the FX cylinders, rain planes, light beams and flame cards.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Textures/PolygonStreetRacer_Texture_01_?.png"],
+        "default": "PolygonStreetRacer_Texture_01_A.png"
+      },
+      "VehicleLivery": {
+        "members": ["Vehicles/PolygonStreetRacer_Veh_Tex_??_*.png"],
+        "default": "PolygonStreetRacer_Veh_Tex_05_Race_Grey.png"
+      }
+    },
+    "bind": [
+      { "model": "S?_Veh_*", "material": "StreetRacerSHD*", "flavor": "VehicleLivery" }
+    ]
+  },
+
+  "POLYGON_Construction_SourceFiles_v3": {
+    "_verification": "SK_Veh_Crane_01's Construction_Mat spans U 0.003 to 0.998 V 0.007 to 0.958 over 2992 faces with 27 distinct colours and 0.2 percent black, and every part samples what a crane is made of: the arm and legs read construction yellow 179,141,55, the leg shafts steel 135,146,154, the hook 117,91,36 and the joysticks 53,56,60. Track_Texture read at the same UVs gives a flat 34,34,35 everywhere, so the two are clearly distinguishable and the atlas is the right one. The excavator tracks go the other way and are the reason Track exists as its own set: SK_Veh_Excavator_01's Tracks material runs V -5.603 to 5.869, eleven tiles vertically, which an atlas cannot serve; on Track_Texture it reads rubber 59,58,60 in 3 colours, while the atlas smears 43. The remaining bindings were each probed on the atlas with no black: SM_Bld_Retainer_Wall_01_Tall reads timber 112,85,66, SM_Bld_Concrete_Pillar_01 reads concrete 135,125,113 and SM_Chr_Attach_Pouch_01 reads olive canvas 77,82,54.",
+    "_uncertain": "lambert2 on SM_Prop_Scaffold_01 and SM_Prop_Scaffold_Preset_01 runs U -1.536 to 2.550, a tiling UV that is not an atlas lookup, so it stays bare; the scaffold's other material is atlas mapped and resolves on its own. lambert2 on SM_Prop_Fence_Wire_01 was not probed and this pack ships a Fence_Alpha.tga that may be what it wants. The nine Glass materials on the vehicles are excluded by kind.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Textures/PolygonConstruction_Texture_01_?.png"],
+        "default": "PolygonConstruction_Texture_01_A.png"
+      },
+      "Track": {
+        "members": ["Misc/Track_Texture.png"],
+        "default": "Track_Texture.png"
+      }
+    },
+    "bind": [
+      { "model": "SK_Veh_*", "material": "Tracks", "flavor": "Track" },
+      { "model": "SK_Veh_*", "material": "Construction_Mat*", "flavor": "Atlas" },
+      { "model": "SM_Bld_Retainer_Wall_*", "material": "ConstructionSHD*", "flavor": "Atlas" },
+      { "model": "SM_Bld_Concrete_Pillar_0*", "material": "lambert*", "flavor": "Atlas" },
+      { "model": "SM_Chr_Attach_*", "material": "lambert*", "flavor": "Atlas" }
+    ]
+  },
+
+  "POLYGON_Gang_Warfare_Source_Files_v4": {
+    "_verification": "488 models in this pack already resolve to PolygonGangWarfare_Texture_01_A through the matcher, so the Atlas set is declared to give all of them the _01_B and _01_C recolours to swap to rather than to fill anything. PolygonGangWarfare_Leaves_Diff.tga is the only leaf texture the pack ships and it is 85.7 percent transparent, so it is bound as a cutout: without the mask the two plants would arrive as solid opaque quads, which is the failure this flag exists to prevent.",
+    "_uncertain": "PolygonGangWarfare_Base_Mat covers five different vehicles, a forklift, two low cars and a truck. The pack ships six Vehicle_0N sheets and they are not interchangeable recolours: edge correlation between them runs 0.550 to 0.972, with 01, 02 and 03 correlating only about 0.55 to 0.58 against each other, so they are art per vehicle rather than one palette. Offering one of them to all five is the mistake the Military AirVehicle set made, so the family stays bare. On SK_Veh_LowCar_01 the vehicle sheet does read better than the atlas, its steering wheel sampling 31,33,35 against the atlas's green 71,93,43, so the right answer is probably a per model mapping that nothing here can express yet. PolygonGangWarfare_Glass and the skydome are excluded by kind.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Textures/PolygonGangWarfare_Texture_01_?.png"],
+        "default": "PolygonGangWarfare_Texture_01_A.png"
+      },
+      "Leaves": {
+        "members": ["Textures/PolygonGangWarfare_Leaves_Diff.tga"],
+        "default": "PolygonGangWarfare_Leaves_Diff.tga",
+        "cutout": true
+      }
+    },
+    "bind": [
+      { "model": "SM_Prop_Plant_0*", "material": "PolygonGangWarfare_Leaf", "flavor": "Leaves" }
+    ]
+  },
+
+  "POLYGON_City_Source_Files": {
+    "_verification": "Declared for its swap surface only. This pack's own materials already resolve, so nothing here fills a bare channel; the set exists so that models wearing PolygonCity_Texture_01_A ship with _01_B and _01_C beside them.",
+    "_uncertain": "Three emissive families are left bare. 31 SM_Sign_Ad_* models ask for Signs_Emission.psd, 18 SM_Sign_Neon_* ask for Neon_Animation.psd and 16 SM_Bld_Background_* ask for Building_Window_Emissive.psd; the pack ships BillboardAds.png and Emissive_01 to _05 with no way to tell which sign wants which. The SciFi City pack's equivalent background building binding is the one change in this repo the user still wants to eyeball in Godot, so its twin here was deliberately not authored ahead of that. The vehicle glass, FX planes, flame mesh and smoke particle are excluded by kind.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Textures/PolygonCity_Texture_01_?.png"],
+        "default": "PolygonCity_Texture_01_A.png"
+      }
+    },
+    "bind": []
+  },
+
+  "POLYGON_Western_Frontier_SourceFiles_v4": {
+    "_verification": "Declared for its swap surface only, the same as the City pack above: this pack's references already resolve through texture_overrides.json, and the set gives those models the _01_B and _01_C recolours.",
+    "_uncertain": "blinn1 on SM_Bld_Teepee_01 asks for Temp.png, a placeholder naming nothing, and one model does not justify a guess. The three SM_Env_BackgroundCard_* models carry lambert242 and lambert244 and this pack ships no card bake for them to wear. SM_Particle_Smoke_Mesh_02 is excluded by kind.",
+    "flavors": {
+      "Atlas": {
+        "members": ["Textures/PolygonWesternFrontier_Texture_01_?.png"],
+        "default": "PolygonWesternFrontier_Texture_01_A.png"
+      }
+    },
+    "bind": []
   }
 }
