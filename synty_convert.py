@@ -18,6 +18,7 @@ import collections
 import fnmatch
 import json
 import os
+import re
 import shutil
 import statistics
 import subprocess
@@ -367,6 +368,14 @@ def channel_of(entry, name):
     return (entry.get("channels") or {}).get(name) or {}
 
 
+# Matches "emissive" and "emission" along with the typos Synty has actually shipped: a
+# doubled m (Emmisive_01, Lavawave_Hot_Inverted_Emmissive, PolygonFantasyKingdom_01_Emmisive,
+# Texture_Emmisive) and that same doubled m against the "-sion" ending
+# (PolygonBattleRoyale_Spotlight_01_Emmision). Tolerating one or two of the m and the s covers
+# every spelling found in the packs without matching unrelated words.
+EMISSIVE_NAME_PATTERN = re.compile(r"em{1,2}is{1,2}")
+
+
 def companion_named(path):
     """True when a texture's name reads as an emissive or normal map rather than an albedo.
 
@@ -375,7 +384,11 @@ def companion_named(path):
     nobody ever notices is missing.
     """
     stem = Path(path).stem.lower()
-    return "emissi" in stem or "normal" in stem or stem.endswith("_bump")
+    return (EMISSIVE_NAME_PATTERN.search(stem) is not None
+            or "normal" in stem
+            # PolygonGangWarfare_Leaves_Nrml.png ships the abbreviation with no vowels.
+            or "nrml" in stem
+            or stem.endswith("_bump"))
 
 
 def apply_channels(record, entry, output_root, res_prefix):
@@ -595,18 +608,35 @@ def report_materials(totals, contexts, judge_bindings=True):
     these files rot.
 
     The same is true of companions: it names which declared emissive or normal map actually
-    reached a material and how many models wore it, flags any declared companion that reached
-    none, and lists the shipped textures that read as a companion map but that no material
-    wears and no companion entry claims. That last line is the worklist this report exists to
-    produce, not a byproduct of it: an unbound map has no other symptom, so without a line
-    naming it, it stays missing.
+    reached a material and how many models wore it, flags any declared companion that is
+    neither reachable through a material nor through a flavor sibling, and lists the shipped
+    textures that read as a companion map but that no material wears and no companion entry
+    claims. That last line is the worklist this report exists to produce, not a byproduct of
+    it: an unbound map has no other symptom, so without a line naming it, it stays missing.
 
     A DEAD verdict is an absence claim, and only a run that could have seen a binding fire
     is entitled to make one: `keep` and `drop` never hand the worker a binding table at all,
     and an incremental run only examined the models it actually reconverted. `judge_bindings`
     tells this function which kind of run it was; when it is false the DEAD check is skipped
     entirely rather than printed on evidence that was never gathered. The same holds for a
-    companion that never reached a material.
+    companion that never reached a material, with one further wrinkle: this report runs
+    before write_manifests, so a companion declared on a member of a flavor set is not yet
+    proven dead just because no observed material wears that exact member. write_manifests
+    generates a sibling manifest record for every other member of a set that some observed
+    material drew from, and sibling_channels gives each sibling its own member's companions,
+    so the entry does real work once manifests are written even though nothing wears it here.
+    A run that has not yet generated its siblings is therefore no more entitled to call such a
+    companion dead than an unjudged run is entitled to call a binding dead; the DEAD check
+    below judges reachability, which extends what `worn` observed directly with every member
+    of a flavor set some observed material drew from, rather than judging `worn` alone.
+
+    A binding reachable only through a sibling is not dead, but it is not in `worn` either,
+    so the `companion` loop above never names it and it would otherwise go unreported in
+    both directions at once. A `sibling` line closes that: it names every entry `reachable`
+    covers that `worn` did not, with no model count, since none observed it, only the fact
+    that write_manifests will still draw a generated sibling manifest record from it. That
+    keeps the report's invariant that every declared companion gets exactly one line saying
+    what became of it, whether that is a model count, a sibling-only note, or a DEAD verdict.
     """
     if not any(totals.materials.values()):
         return
@@ -675,10 +705,34 @@ def report_materials(totals, contexts, judge_bindings=True):
             target = (companions.get(albedo) or {}).get(channel, "?")
             print(f"     companion {Path(albedo).name:<32} -> {channel} "
                   f"{Path(target).name}  ({count} models)")
+        # A companion on a flavor set member is reachable even when nothing wears that exact
+        # member, because write_manifests generates a sibling manifest record for every other
+        # member of a set some observed material drew from, and sibling_channels gives each
+        # sibling its own member's companions. Reachability therefore extends `worn` with every
+        # member of any set an observed albedo belongs to, not just the member actually worn,
+        # so a set nothing in the pack draws from still leaves its companions unreachable.
+        observed_albedo_members = {channel_of(material, "albedo").get("member")
+                                   for material in materials.values()}
+        sets_drawn_from = [name for name, definition in sets.items()
+                           if observed_albedo_members & set(definition["members"])]
+        reachable = set(worn)
+        for name in sets_drawn_from:
+            for member in sets[name]["members"]:
+                for channel in material_flavors.COMPANION_CHANNELS:
+                    if channel in (companions.get(member) or {}):
+                        reachable.add((member, channel))
+        # A binding in `reachable` but not in `worn` fired on no observed material, so the
+        # companion loop above never named it, yet write_manifests will still draw a
+        # generated sibling manifest record from it. That is a fact, not an absence, so it
+        # is reported unconditionally, the same as the companion loop above it.
+        for albedo, channel in sorted(reachable - set(worn)):
+            target = (companions.get(albedo) or {}).get(channel, "?")
+            print(f"     sibling   {Path(albedo).name:<32} -> {channel} "
+                  f"{Path(target).name}  (0 models wear it; a generated sibling will)")
         if judge_bindings:
             for albedo, declared in sorted(companions.items()):
                 for channel in sorted(declared):
-                    if (albedo, channel) not in worn:
+                    if (albedo, channel) not in reachable:
                         print(f"     DEAD     companion '{albedo}' {channel} reached no "
                               f"material; remove it from material_overrides.json or fix "
                               f"its glob")

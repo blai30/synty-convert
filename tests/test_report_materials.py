@@ -163,9 +163,11 @@ class CompanionReporting(unittest.TestCase):
         """An absolute path under SOURCE_ROOT, the shape the textures index holds."""
         return f"{self.SOURCE_ROOT}/{name}"
 
-    def report(self, materials, companions, judge=True, textures=None, source_root=None):
+    def report(self, materials, companions, judge=True, textures=None, source_root=None,
+               sets=None):
         totals = make_totals(materials={"Pack": materials})
-        contexts = {"Pack": {"materials": {"sets": {}, "bind": [], "companions": companions},
+        contexts = {"Pack": {"materials": {"sets": sets or {}, "bind": [],
+                                           "companions": companions},
                              "textures": textures or [],
                              "source_root": source_root or self.SOURCE_ROOT}}
         buffer = io.StringIO()
@@ -241,6 +243,130 @@ class CompanionReporting(unittest.TestCase):
             self.texture_path("Textures/PolygonCasino_Texture_01_A.png")])
         self.assertNotIn("candidates", output)
 
+    def test_a_companion_on_an_unworn_flavor_sibling_is_not_reported_dead(self):
+        # Nothing wears Atlas_01_B directly, but Atlas_01_A does, and both are members of
+        # the same flavor set. write_manifests will generate a sibling record wearing
+        # Atlas_01_B once it runs, and that sibling gets its own member's companion, so the
+        # entry declared here already does real work despite reaching no observed material.
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png"],
+                          "default": "Textures/Atlas_01_A.png"}}
+        companions = {"Textures/Atlas_01_B.png": {"emission": "Textures/Emissive_01.png"}}
+        output = self.report(materials, companions, sets=sets)
+        self.assertNotIn("DEAD", output)
+
+    def test_a_companion_outside_any_drawn_flavor_set_is_still_reported_dead(self):
+        # An unrelated flavor set exists in the pack and IS drawn from, but the companion's
+        # own texture is not one of its members, so reachability through a sibling never
+        # applies to it. A fix that grants reachability merely because some set was drawn
+        # from, without checking set membership, would wrongly clear this entry.
+        materials = {"Atlas_02_A": companion_material_entry("Textures/Atlas_02_A.png"),
+                    "Wall_01": companion_material_entry("Textures/Wall_01.png")}
+        sets = {"Wall": {"members": ["Textures/Wall_01.png", "Textures/Wall_02.png"],
+                         "default": "Textures/Wall_01.png"}}
+        companions = {"Textures/Atlas_01_A.png": {"emission": "Textures/Emissive_01.png"}}
+        output = self.report(materials, companions, sets=sets)
+        self.assertIn("DEAD", output)
+        self.assertIn("Textures/Atlas_01_A.png", output)
+
+    def test_a_companion_on_an_undrawn_flavor_set_is_still_reported_dead(self):
+        # The set exists and the companion is one of its own members, but no observed
+        # material's albedo belongs to this set, so write_manifests never generates a
+        # sibling for it either. A fix that grants reachability merely because a texture
+        # belongs to some flavor set, without checking the set was actually drawn from,
+        # would wrongly clear this entry; the set genuinely goes unused here.
+        materials = {"Wall_01": companion_material_entry("Textures/Wall_01.png")}
+        sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png"],
+                          "default": "Textures/Atlas_01_A.png"}}
+        companions = {"Textures/Atlas_01_B.png": {"emission": "Textures/Emissive_01.png"}}
+        output = self.report(materials, companions, sets=sets)
+        self.assertIn("DEAD", output)
+        self.assertIn("Textures/Atlas_01_B.png", output)
+
+    def test_dead_is_not_claimed_for_an_undrawn_flavor_set_on_an_unjudged_run(self):
+        # Same genuinely-inert entry as the previous test, but judge_bindings is False: the
+        # gate must still suppress DEAD entirely, proving the new reachability path stays
+        # inside the existing gate rather than printing on its own.
+        materials = {"Wall_01": companion_material_entry("Textures/Wall_01.png")}
+        sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png"],
+                          "default": "Textures/Atlas_01_A.png"}}
+        companions = {"Textures/Atlas_01_B.png": {"emission": "Textures/Emissive_01.png"}}
+        output = self.report(materials, companions, sets=sets, judge=False)
+        self.assertNotIn("DEAD", output)
+
+    def test_a_sibling_only_companion_is_reported_and_distinct_from_a_worn_one(self):
+        # Atlas_01_A is worn directly by an observed material and carries its own companion.
+        # Atlas_01_B is a member of the same flavor set but nothing wears it; write_manifests
+        # will still generate a sibling record for it that takes its own companion. The
+        # report must show both, and a reader scanning must be able to tell which is which
+        # without reading the source: only the worn one carries a model count.
+        materials = {"Atlas_01_A_Emissive": companion_material_entry(
+            "Textures/Atlas_01_A.png", used_by=5,
+            emission={"member": "Textures/Emissive_01_A.png", "method": "companion",
+                      "texture": "/out/Pack/Textures/Emissive_01_A.png"})}
+        sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png"],
+                          "default": "Textures/Atlas_01_A.png"}}
+        companions = {"Textures/Atlas_01_A.png": {"emission": "Textures/Emissive_01_A.png"},
+                      "Textures/Atlas_01_B.png": {"emission": "Textures/Emissive_01_B.png"}}
+        output = self.report(materials, companions, sets=sets)
+        companion_lines = [line for line in output.splitlines()
+                           if line.strip().startswith("companion")]
+        sibling_lines = [line for line in output.splitlines()
+                         if line.strip().startswith("sibling")]
+        self.assertEqual(len(companion_lines), 1)
+        self.assertIn("Atlas_01_A.png", companion_lines[0])
+        self.assertIn("(5 models)", companion_lines[0])
+        self.assertEqual(len(sibling_lines), 1)
+        self.assertIn("Atlas_01_B.png", sibling_lines[0])
+        self.assertIn("Emissive_01_B.png", sibling_lines[0])
+        self.assertNotIn("models)", sibling_lines[0])
+        self.assertNotIn("DEAD", output)
+
+    def test_a_worn_member_does_not_also_print_its_own_sibling_line(self):
+        # Atlas_01_A is both directly worn and a member of the flavor set it belongs to, so
+        # a `reachable` set that forgot to subtract `worn` would print it twice: once as
+        # "companion" with its real count, once as "sibling" wrongly claiming no model
+        # wears it. Only the companion line is true here.
+        materials = {"Atlas_01_A_Emissive": companion_material_entry(
+            "Textures/Atlas_01_A.png", used_by=7,
+            emission={"member": "Textures/Emissive_01_A.png", "method": "companion",
+                      "texture": "/out/Pack/Textures/Emissive_01_A.png"})}
+        sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png"],
+                          "default": "Textures/Atlas_01_A.png"}}
+        companions = {"Textures/Atlas_01_A.png": {"emission": "Textures/Emissive_01_A.png"}}
+        output = self.report(materials, companions, sets=sets)
+        self.assertIn("(7 models)", output)
+        self.assertNotIn("sibling", output)
+
+    def test_a_companion_neither_worn_nor_sibling_reachable_reports_dead_not_sibling(self):
+        # Atlas_02_A wears no companion, belongs to no flavor set, and the declared
+        # companion sits on a different atlas entirely. Nothing can reach it, so it must
+        # still print DEAD, and specifically must not print as a sibling line, which would
+        # wrongly claim write_manifests can still reach it through a generated sibling.
+        materials = {"Atlas_02_A": companion_material_entry("Textures/Atlas_02_A.png", used_by=3)}
+        companions = {"Textures/Atlas_01_A.png": {"emission": "Textures/Emissive_01_A.png"}}
+        output = self.report(materials, companions)
+        self.assertIn("DEAD", output)
+        self.assertIn("Textures/Atlas_01_A.png", output)
+        self.assertNotIn("sibling", output)
+
+    def test_judge_bindings_false_suppresses_dead_but_not_the_sibling_line(self):
+        # Two declared companions: Atlas_01_B is sibling-reachable and Atlas_02_A is
+        # reachable by nothing at all. With judge_bindings False the DEAD verdict on
+        # Atlas_02_A must stay suppressed, exactly as before this change, while the sibling
+        # line for Atlas_01_B must still print: it states a fact about reachability that an
+        # incremental run can observe from what it did convert, not an absence claim about
+        # the whole pack, so the existing gate must not have been widened to cover it too.
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png"],
+                          "default": "Textures/Atlas_01_A.png"}}
+        companions = {"Textures/Atlas_01_B.png": {"emission": "Textures/Emissive_01_B.png"},
+                      "Textures/Atlas_02_A.png": {"emission": "Textures/Emissive_02_A.png"}}
+        output = self.report(materials, companions, sets=sets, judge=False)
+        self.assertNotIn("DEAD", output)
+        self.assertIn("sibling", output)
+        self.assertIn("Atlas_01_B.png", output)
+
     def test_more_than_six_candidates_are_truncated_with_a_correct_remainder(self):
         # Nine unbound, unclaimed emissive maps: the line must name the first six sorted by
         # name and report the remaining three as "and 3 more", not any other split.
@@ -271,6 +397,24 @@ class CompanionNamed(unittest.TestCase):
             "Dungeons_Texture_FloorTiles_Normal",
         )
         for name in companion_named_examples:
+            with self.subTest(name=name):
+                self.assertTrue(synty_convert.companion_named(name))
+
+    def test_recognizes_the_misspellings_synty_actually_shipped(self):
+        # Every one of these is a real filename found on disk, not a hypothetical: a doubled
+        # m (Dungeon Pack, FantasyKingdom, Pirate Pack), a doubled m with a doubled s
+        # (Lavawave_Hot_Inverted_Emmissive.png in AridDesert, the bug that opened this gap),
+        # a doubled m against the "-sion" ending (BattleRoyale), and a vowel-less abbreviation
+        # of "Normal" (Gang Warfare).
+        misspelled_companion_named_examples = (
+            "Emmisive_01",
+            "Lavawave_Hot_Inverted_Emmissive",
+            "PolygonBattleRoyale_Spotlight_01_Emmision",
+            "PolygonFantasyKingdom_01_Emmisive",
+            "PolygonGangWarfare_Leaves_Nrml",
+            "Texture_Emmisive",
+        )
+        for name in misspelled_companion_named_examples:
             with self.subTest(name=name):
                 self.assertTrue(synty_convert.companion_named(name))
 
