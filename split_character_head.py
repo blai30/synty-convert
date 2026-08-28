@@ -111,10 +111,10 @@ def boundary_loops(boundary):
             current = stack.pop()
             loop.append(current)
             for vertex in current.verts:
-                for neighbour in incident[vertex]:
-                    if neighbour not in visited:
-                        visited.add(neighbour)
-                        stack.append(neighbour)
+                for neighbor in incident[vertex]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        stack.append(neighbor)
         loops.append(loop)
     return loops
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import audit
 import synty_convert
 
 PACK = "FantasyKingdom"
@@ -511,6 +512,94 @@ class SiblingCompanions(unittest.TestCase):
         self.assertEqual(len(siblings), 1)
         self.assertEqual(siblings[0]["emission_color"], [1.0, 0.0, 0.0])
         self.assertEqual(siblings[0]["emission_energy"], 2.5)
+
+
+class DiagnosticKeysAgreeWithAudit(unittest.TestCase):
+    """Regression test for Minor 3: audit.is_diagnostic must recognize every key
+    flavor_variants strips from a generated sibling.
+
+    Both rules encode the same fact, that a sibling never resolved anything against an
+    FBX of its own, so it carries no key describing how a reference resolved, but they
+    live in two files and are each tested separately today. Nothing asserts the two
+    agree, so a future edit to either one, narrowing is_diagnostic's suffix check or
+    widening flavor_variants to strip a new diagnostic key, could silently desync them,
+    and audit.py would start failing a correct sibling for a key that renders nothing.
+    Placed in this file rather than in an audit-specific test file because the fixture
+    the assertion needs, a real flavor_variants call producing a real sibling with all
+    four channels populated, already lives here for the tests above it.
+
+    The assertion below computes the stripped key set from the difference between the
+    base record and the generated sibling, rather than restating the diagnostic key
+    names as a literal list, so it is the actual stripping behavior under test, not a
+    second copy of the same assumption.
+    """
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.output_root = Path(self.tempdir.name)
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def mirror(self, relative):
+        target = self.output_root / PACK / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"")
+
+    def test_every_key_flavor_variants_strips_is_recognized_by_audit(self):
+        self.mirror("Textures/Atlas_01_B.png")
+        self.mirror("Textures/Emissive_01_A.png")
+        self.mirror("Textures/Normal_01_A.png")
+        companions = {
+            "Textures/Atlas_01_A.png": {"emission": "Textures/Emissive_01_A.png",
+                                        "normal": "Textures/Normal_01_A.png"},
+            "Textures/Atlas_01_B.png": {"emission": "Textures/Emissive_01_A.png",
+                                        "normal": "Textures/Normal_01_A.png"},
+        }
+        entry = entry_for("Textures/Atlas_01_A.png")
+        entry["channels"]["alpha"] = {
+            "member": "Textures/Mask_01_A.png", "texture_source": "Textures/Mask_01_A.png",
+            "reference": "Mask_01_A.psd", "method": "suffix"}
+        entry["channels"]["emission"] = {
+            "member": "Textures/Emissive_01_A.png",
+            "texture_source": "Textures/Emissive_01_A.png",
+            "texture": str(self.output_root / PACK / "Textures/Emissive_01_A.png"),
+            "reference": "Emissive_01_A.psd", "method": "suffix"}
+        entry["channels"]["normal"] = {
+            "member": "Textures/Normal_01_A.png",
+            "texture_source": "Textures/Normal_01_A.png",
+            "texture": str(self.output_root / PACK / "Textures/Normal_01_A.png"),
+            "reference": "Normal_01_A.psd", "method": "suffix"}
+        # Every diagnostic key the real write_manifests loop can produce across all four
+        # channels, so the strip has something of each shape to remove.
+        record = {
+            "name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+            "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
+            "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
+            "emission_texture": "res://assets/FantasyKingdom/Textures/Emissive_01_A.png",
+            "emission_energy": 1.0,
+            "normal_texture": "res://assets/FantasyKingdom/Textures/Normal_01_A.png",
+            "normal_scale": 1.0,
+            "reference": "Atlas_01_A.psd", "match": "exact",
+            "alpha_reference": "Mask_01_A.psd", "alpha_match": "suffix",
+            "emission_reference": "Emissive_01_A.psd", "emission_match": "suffix",
+            "normal_reference": "Normal_01_A.psd", "normal_match": "suffix",
+        }
+        warnings = []
+        siblings = synty_convert.flavor_variants(
+            record, entry, SETS, companions, self.output_root, PACK, RES_PREFIX, warnings)
+        self.assertEqual(len(siblings), 1)
+        self.assertEqual(warnings, [])
+        sibling = siblings[0]
+
+        stripped = set(record) - set(sibling)
+        # Guard against a vacuous pass: if nothing were actually stripped, every key
+        # would trivially be "recognized" by audit for lack of anything to check.
+        self.assertTrue(stripped)
+        for key in stripped:
+            self.assertTrue(audit.is_diagnostic(key),
+                            f"flavor_variants strips {key!r} but audit.is_diagnostic "
+                            f"does not recognize it as diagnostic")
 
 
 if __name__ == "__main__":

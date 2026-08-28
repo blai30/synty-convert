@@ -383,6 +383,52 @@ class CompanionReporting(unittest.TestCase):
         self.assertIn("and 3 more", output)
 
 
+class UnjudgedRunNotice(unittest.TestCase):
+    """Regression test for Minor 1: the notice must name whichever table went unjudged.
+
+    Horror Carnival, Casino, War and City declare companions and no `bind` entries at
+    all, so a run that cannot judge health, `--untextured keep` or an incremental run,
+    must still say so for them. Before this fix the notice only fired under
+    `elif bindings:`, so a companion-only pack stayed silent about its skipped DEAD
+    check.
+    """
+
+    def report(self, materials, bindings, companions, judge):
+        totals = make_totals(materials={PACK: materials})
+        contexts = {PACK: {"materials": {
+            "sets": {}, "bind": bindings, "companions": companions}}}
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            synty_convert.report_materials(totals, contexts, judge_bindings=judge)
+        return buffer.getvalue()
+
+    def test_companion_only_pack_is_named_when_unjudged(self):
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        companions = {"Textures/Atlas_01_A.png": {"emission": "Textures/Emissive_01.png"}}
+        output = self.report(materials, [], companions, judge=False)
+        self.assertIn("companion health not assessed this run", output)
+        self.assertNotIn("binding health not assessed this run", output)
+
+    def test_binding_only_pack_is_named_when_unjudged(self):
+        materials = {"Wall_Evil_01": material_entry("Wall_Evil_01", "exact", "Wall_Evil_01.png")}
+        bindings = [{"model": "*", "material": "Wall*", "flavor": "Wall"}]
+        output = self.report(materials, bindings, {}, judge=False)
+        self.assertIn("binding health not assessed this run", output)
+        self.assertNotIn("companion health not assessed this run", output)
+
+    def test_both_tables_are_named_together_when_unjudged(self):
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        bindings = [{"model": "*", "material": "Wall*", "flavor": "Wall"}]
+        companions = {"Textures/Atlas_01_A.png": {"emission": "Textures/Emissive_01.png"}}
+        output = self.report(materials, bindings, companions, judge=False)
+        self.assertIn("binding and companion health not assessed this run", output)
+
+    def test_neither_table_prints_no_notice(self):
+        materials = {"Wall_Evil_01": material_entry("Wall_Evil_01", "exact", "Wall_Evil_01.png")}
+        output = self.report(materials, [], {}, judge=False)
+        self.assertNotIn("not assessed", output)
+
+
 class CompanionNamed(unittest.TestCase):
     """companion_named decides the authoring worklist, so its name recognition is load-bearing:
     a false negative here is a map nobody ever notices is missing.

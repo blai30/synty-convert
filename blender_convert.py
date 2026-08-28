@@ -791,7 +791,7 @@ def island_triangles(mesh):
     """Triangle count of the connected island each polygon belongs to.
 
     Coincident vertices are welded first. Nothing here has been through glTF yet, but Maya
-    leaves a trunk built from separately modelled sections meeting at unmerged vertices,
+    leaves a trunk built from separately modeled sections meeting at unmerged vertices,
     which would otherwise read as dozens of islands instead of one.
     """
     working = bmesh.new()
@@ -817,10 +817,10 @@ def island_triangles(mesh):
             current = stack.pop()
             island.append(current)
             for edge in current.edges:
-                for neighbour in edge.link_faces:
-                    if neighbour.index not in seen:
-                        seen.add(neighbour.index)
-                        stack.append(neighbour)
+                for neighbor in edge.link_faces:
+                    if neighbor.index not in seen:
+                        seen.add(neighbor.index)
+                        stack.append(neighbor)
         total = sum(len(polygon.verts) - 2 for polygon in island)
         for polygon in island:
             sizes[polygon[origin]] = total
@@ -1014,9 +1014,16 @@ def convert(job, options, packs):
     mode = options.get("untextured", "fill")
     context = packs.get(job.get("pack"), {})
     if mode in ("keep", "drop"):
-        # Filling is off, so the worker must not see a binding table it would act on.
+        # Filling is off, so the worker must not see a flavor binding table it would act on.
         # --untextured keep --scan-materials is therefore how you see what is still bare.
-        context = {key: value for key, value in context.items() if key != "materials"}
+        # A companion or sibling never fills a bare material; it only adds an emission or
+        # normal channel to a material that already resolved an atlas, so --untextured has
+        # no business governing it. It is left in place, which means it reaches strictly
+        # fewer materials under keep than under fill, since there are no flavor-filled
+        # albedos left for it to key off. That is correct, not a shortfall.
+        materials = context.get("materials", {})
+        context = dict(context)
+        context["materials"] = {key: value for key, value in materials.items() if key != "bind"}
 
     if options.get("scan_only"):
         # Report what the materials resolve to without writing output. Foliage bindings are

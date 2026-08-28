@@ -763,8 +763,10 @@ def report_materials(totals, contexts, judge_bindings=True):
                     print(f"     DEAD     binding '{binding['material']}' on model "
                           f"'{binding['model']}' matched nothing; remove it from "
                           f"material_overrides.json or fix its glob")
-        elif bindings:
-            print(f"     binding health not assessed this run; rerun with "
+        elif bindings or companions:
+            kinds = [kind for kind, table in (("binding", bindings), ("companion", companions))
+                     if table]
+            print(f"     {' and '.join(kinds)} health not assessed this run; rerun with "
                   f"--untextured fill --force to judge it")
         for entry, channel, found in sorted(asked, key=lambda item: -item[0]["used_by"]):
             # A trimmed match dropped tokens to find its winner, so it is a guess like any

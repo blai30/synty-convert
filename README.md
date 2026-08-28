@@ -20,7 +20,7 @@ split_character_head.py splits character heads         (used by blender_convert.
 texture_overrides.json manual texture mappings
 scale_overrides.json   unit corrections for packs that declare the wrong one
 foliage_overrides.json textures for foliage whose FBX names none at all
-material_overrides.json curated flavor sets and material bindings
+material_overrides.json curated flavor sets, material bindings and companion maps
 
 tools/                 Godot side scripts, copied into your project as <project>/tools/
 synty_packs_fbx/       put the packs here
@@ -34,7 +34,7 @@ Synty FBX do not import cleanly into Godot on their own. The converter deals wit
 
 - **Scale and axes.** The packs are authored in Maya in centimeters, Y-up. A naive conversion gives you a `Node3D` or `Skeleton3D` scaled to 1/100 and rotated 90 degrees, which throws off every `BoneAttachment3D`, collision shape and root motion value. The converter bakes that away, so a character arrives 1.79 m tall, upright, standing at Y = 0, on identity transforms. A few packs declare a unit their geometry is not actually in; see [Fixing a pack that converts too small](#fixing-a-pack-that-converts-too-small).
 - **Broken texture references.** Every material points at internal authoring files that were never shipped, usually named for a different pack. The converter works out which shipped texture each one meant.
-- **Dropped material channels.** A handful of Synty materials carry an emissive map, a normal map or a transparency mask alongside their atlas. The converter carries every channel the FBX declares across to the GLB; see [What the materials carry](#what-the-materials-carry).
+- **Dropped material channels.** A handful of Synty materials carry an emissive map, a normal map or a transparency mask alongside their atlas, and the converter carries every channel the FBX declares across to the GLB; see [What the materials carry](#what-the-materials-carry). Far more packs ship an emissive or a normal map that no FBX references at all, because that wiring lived in Unity materials rather than in the export. A curated table puts those back; see [Companion maps](#companion-maps).
 - **Duplicated textures.** Synty FBX embed their atlas, so a naive conversion copies a 2048x2048 PNG into every model. The converter references one shared file instead.
 - **Authoring leftovers.** Some models carry a single-key `Take 001` that only restates the import transform, or an Unreal `UCX_` collision hull. Both are dropped. Left in, the take blocks normalization and then reapplies in Godot the very transform normalization exists to remove, and the hull arrives as a visible untextured box over the prop it was meant to bound.
 - **Stacked LOD levels.** The Nature Biomes packs ship each tree and bush as a chain of progressively cheaper meshes, which Godot has no way to read as a chain and therefore renders all at once. Only the finest level is kept; see [LOD chains](#lod-chains).
@@ -89,14 +89,17 @@ python synty_convert.py --scan-materials --packs PolygonFantasyKingdom
 ```
 
 ```
-PolygonFantasyKingdom: 20 materials  (1 exact, 0 override, 2 heuristic, 9 unresolved, 8 untextured)
-   review  PolygonCastle_Texture_01_A.psd -> PolygonFantasyKingdom_01_A (1896 files)
-   review  PolygonFantasyKingdon_Texture_Wall_Brick_01.png -> Wall_Brick_01 (1 files)
-   UNRESOLVED  Horse_Texture_01.psd  (color only; add to texture_overrides.json)
-   UNRESOLVED  WALL.bmp  (color only; add to texture_overrides.json)
+PolygonFantasyKingdom: 20 materials  (0 exact, 3 override, 8 heuristic, 6 unresolved, 16 filled, 3 untextured)
+   8 carry an emission map, 7 carry a normal map
+   companion PolygonFantasyKingdom_01_A.png   -> emission PolygonFantasyKingdom_01_Emmisive.png  (1978 models)
+   candidates 6 unbound companion map(s): Grass_02_Normals.png, Grass_03_Normals.png, Ground_Base_01_Normals.png, PolygonFantasyKingdom_02_Normals.png, Sand_02_Normal.png, Sand_03_Normals.png
+   review  PolygonCastle_Texture_01_A.psd -> PolygonFantasyKingdom_01_A_Emmisive_Normals (1893 files)
+   manual  Paintings_02.psd -> Paintings_01 (18 files)
+   UNRESOLVED  PolygonCastle_Texture_Normal_01.png  (19 files, no normal map; add to texture_overrides.json)
+   UNRESOLVED  PolygonApocalypse_Texture_01_Cleaned.psd  (1 files, color only; add to texture_overrides.json)
 ```
 
-`review` lines resolved by heuristic and are worth a glance. `UNRESOLVED` means no confident match was found, so that material will carry color only. See [Fixing unresolved textures](#fixing-unresolved-textures).
+`review` lines resolved by heuristic and are worth a glance; `manual` lines came from `texture_overrides.json`. `UNRESOLVED` means no confident match was found, so that channel binds nothing. See [Fixing unresolved textures](#fixing-unresolved-textures). The `filled` count and the `companion` and `candidates` lines are about textures no FBX names at all; see [Flavor sets and default textures](#flavor-sets-and-default-textures) and [Companion maps](#companion-maps).
 
 ### 2. Convert
 
@@ -243,28 +246,31 @@ Across all eleven packs here that is 2 of 154. Both are meshes whose vendor geom
 
 ## What the materials carry
 
-Every channel an FBX declares is carried across. The converter reads each one from the Principled BSDF socket Blender's FBX importer drove, so a material in the GLB says what the source material said, and the generated `.tres` says the same thing again.
+Every channel an FBX declares is carried across. The converter reads each one from the Principled BSDF socket Blender's FBX importer drove, so a material in the GLB says what the source material said, and the generated `.tres` says the same thing again. Where the FBX declares nothing, a curated table can supply an emissive or a normal map the pack shipped but never wired up; see [Companion maps](#companion-maps).
 
-| FBX property | Becomes | Declared across 10,488 source materials |
-| --- | --- | --- |
-| `DiffuseColor` | base color texture, or the color where no map is bound | 9,943 |
-| `TransparentColor` | alpha, cut out at 0.5 | 179 |
-| `EmissiveColor` | emissive texture, or emissive color | 79 map, 4 color |
-| `NormalMap` / `Bump` | normal map, with tangents exported for those models | 125 |
-| `Shininess` | roughness, as `1 - sqrt(shininess) / 10` | 753 |
-| `ReflectionFactor` | metallic | 710 |
+| FBX property | Becomes | Declared by the FBX | Supplied by a companion |
+| --- | --- | --- | --- |
+| `DiffuseColor` | base color texture, or the color where no map is bound | 14,858 | never |
+| `TransparentColor` | alpha, cut out at 0.5 | 230 | never |
+| `EmissiveColor` | emissive texture, or emissive color | 182 map, 4 color | 97 bindings across 16 packs |
+| `NormalMap` / `Bump` | normal map, with tangents exported for those models | 82 | 95 bindings across 14 packs |
+| `Shininess` | roughness, as `1 - sqrt(shininess) / 10` | 1,246 | never |
+| `ReflectionFactor` | metallic | 1,273 | never |
 
-Two things are worth knowing before you go looking for glowing props. **Only two packs wire up emission at all**: NatureBiomes AridDesert on 77 materials, and SciFiSpace on 2. **The models named for a glow do not have any.** `SM_Env_GlowingOrb_01`, `SM_Veh_WarpGate_Glow_01`, the Dungeons Realms obelisks and the Military glowstick each declare a single diffuse texture and nothing else. Several packs ship an `Emissive_0x.png` atlas that no FBX in the pack references. That glow lived in Unity materials, which are not part of the source packs, so there is nothing in the FBX to recover.
+The third column counts the 15,607 materials of the 15,506 models that import across the 22 packs here, one entry per distinct material on a model. It is read off `--untextured keep`, which is the mode that withholds flavor filling and so shows a material exactly as bare as its FBX left it; the texture rows count a material whose FBX named a file, and `Shininess` and `ReflectionFactor`, which name no file, count one that declared a value other than the default. The fourth column is not in the same units and the two do not add up: a companion binding is one shipped atlas paired with one map, and a single binding covers every material and every model wearing that atlas. The two `never` rows are by design rather than by omission, since a companion hangs off an albedo instead of supplying one, and glTF carries coverage on the base color texture rather than in a map of its own.
 
-Normal maps are similar. Of 125 bindings, 87 name no file at all (the path was emptied before export) and most of the rest name a file the pack never shipped, which leaves 5 that resolve. They are reported like any other unresolved reference.
+Two things are worth knowing before you go looking for glowing props. **The FBX themselves are nearly silent about emission**: 182 materials in four packs name an emissive file, Casino on 102, NatureBiomes AridDesert on 77, SciFiSpace on 2 and Horror Carnival on 1, and four more in FantasyKingdom and SciFiSpace declare an emissive color with no map. **The models named for a glow declare none of their own.** `SM_Env_GlowingOrb_01`, `SM_Veh_WarpGate_Glow_01`, the Dungeons Realms obelisks and the Military glowstick each carry a single diffuse texture and nothing else. That glow lived in Unity materials, which are not part of the source packs, so there is nothing in the FBX to recover. What did ship is the map itself: sixteen of the 22 packs here carry an emissive sheet that no FBX in the pack references, sitting in the texture folder with nothing pointing at it, and the `companions` table is where those are wired back up. The orbs and the obelisks do glow now, because the atlas they wear does; the glowstick still does not, because Military ships an emissive for its land vehicles and none for the character atlas.
 
-Materials are still keyed on their atlas, but a material that carries anything beyond one takes a qualifier so it cannot collapse into the plain material wearing the same atlas and quietly lose a map:
+Normal maps are the same story told from the other end. 82 materials name a normal file, again in four packs, and only 5 of them resolve: Horror Carnival's 41 and FantasyKingdom's 24 name files their packs never shipped, Casino's 3 likewise, and the 5 that land are all in AridDesert. Those are reported like any other unresolved reference. A material can also carry a normal slot whose path was emptied before export, which leaves no file name to resolve and so never reaches that count at all. Beside those 5, companions supply 95 normal bindings across 14 packs, which is where all but a handful of the normal maps in the output come from.
+
+Materials are still keyed on their atlas, but a material that carries anything beyond one takes a qualifier so it cannot collapse into the plain material wearing the same atlas and quietly lose a map. A companion contributes a qualifier exactly as a map the FBX named does, which is why AridDesert has no plain atlas material left at all:
 
 ```
-PolygonNatureBiomesS2_AridDesert_Texture_01                      the atlas alone
-PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A        the same atlas, plus an emissive map
+PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A        the atlas, plus the emissive declared for it
 PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A_Cutout the same again, masked
-Lambert_A45_808080                                               no atlas: alpha 0.45, gray
+PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A_A45    the same again at alpha 0.45
+Lavawave_Hot_Emissive_normals                                    a different sheet, carrying both companion channels
+Lambert_808080                                                   no atlas: gray
 ```
 
 Qualifiers come from the material itself and never from the order files happen to be converted in, so one name means one thing across a whole pack.
@@ -272,6 +278,61 @@ Qualifiers come from the material itself and never from the order files happen t
 Two limits are worth stating. glTF carries coverage on the base color texture's alpha channel rather than in a map of its own, so a mask has to be the file the material is colored with. Every Synty material that binds a mask already names the same file, apart from eleven Military fences that name only the mask, which then supplies their color too. And a mask whose file has no alpha channel cannot be expressed at all; those are warned about and left opaque.
 
 Godot imports a normal map correctly on its own, but check the texture's **Import** dock shows **Normal Map** under compression if a surface looks flat.
+
+## Companion maps
+
+Synty packs ship emissive and normal maps that no FBX references. The wiring for them lived in Unity materials, which are not part of the source drop, so the file arrives in the pack's texture folder with nothing pointing at it and no symptom other than a prop that never lights up. `material_overrides.json` carries a `companions` table per pack saying which map belongs with which atlas, and the converter fills any material channel that resolved to nothing. Eighteen packs declare one; a nineteenth, Nature, was measured and declares none, for reasons recorded in the file. Trimmed from SciFi City's real entry:
+
+```json
+{
+  "POLYGON_SciFi_City_SourceFiles_v5": {
+    "companions": {
+      "Textures/PolygonScifi_01_A.png": {
+        "emission": "Textures/PolygonScifi_Emissive_01.png",
+        "normal": "Textures/PolygonSciFiCity_Texture_Normal.png"
+      },
+      "Textures/Alternates/PolygonScifi_01_?.png": {
+        "emission": "Textures/PolygonScifi_Emissive_01.png",
+        "normal": "Textures/PolygonSciFiCity_Texture_Normal.png"
+      },
+      "Textures/PolygonSciFi_Road_01.png": {
+        "normal": "Textures/PolygonSciFi_Road_Normal.png"
+      }
+    }
+  }
+}
+```
+
+**Keyed on the atlas rather than on a material**, because that is what a companion actually belongs to: one emissive serves every material wearing the sheet it was painted for, and usually every recolor of that sheet too. Street Racer's single `PolygonStreetRacer_Texture_Emissive_01.png` covers a 27 member livery set, a three member atlas set and two loose sheets that belong to neither, and reaches 1352 models through `PolygonStreetRacer_Veh_Tex_05_Race_Grey.png` alone. So a key is a path-suffix glob that may match many shipped textures, matched the same way a flavor set's `members` are, while each channel's **value must match exactly one file**. The asymmetry is the whole point. A key that matches too widely costs one wasted entry, whereas a value matching two candidates would put a texture nobody chose onto every material wearing that atlas, which is the plausible-but-wrong result this tool exists to avoid. A value that matches zero files or more than one is dropped with a warning rather than guessed at, and two keys that overlap on the same atlas and channel are reported rather than resolved by whichever sorted first.
+
+Keying on the atlas also means a companion follows a material however it reached its texture. The lookup runs on whatever the albedo finally settled on, so a bare material that `--untextured fill` has just given an atlas to takes that atlas's maps as well, with nothing extra to declare.
+
+**A companion only ever fills a channel that resolved to nothing**, so a map the FBX named itself always wins. FantasyKingdom is the case that shows what the rule buys: its atlas emissive reaches 1978 models and its atlas normal only 1954, and the 24 model gap is not a miss. Those are the materials naming `PolygonCastle_Texture_Normal_01.png`, `HouseRoofNormals.png` and `Woods_normals.png`, none of which the pack ever shipped. An unresolved reference is not nothing, so those keep the unresolved reference their own FBX declared and take the glow anyway.
+
+**A companion renames the material**, because it is shaped exactly like a resolved reference and the naming pass cannot tell the two apart. FantasyKingdom's atlas material is `PolygonFantasyKingdom_01_A_Emmisive_Normals` rather than `PolygonFantasyKingdom_01_A`, and each of its five wall flavors takes its own normal's name, `Wall_Brick_01_Normals` through `Wall_Stucco_01_Normals`. That is the ordinary qualifier rule doing its job: a material carrying a map must not collapse into one that does not.
+
+**There is no flag.** Companions are curated facts about a pack, like `texture_overrides.json` and `foliage_overrides.json`, so a conversion applies them under every `--untextured` mode and there is nothing to switch on. `--untextured` governs bare materials, meaning ones whose albedo resolved to nothing: `keep` and `drop` turn flavor filling off, exactly as before, but a companion is not governed by that flag, because it can never turn a bare material into a textured one. It only adds an emission or normal channel to a material that already resolved an atlas, whether that atlas came from the FBX itself or from a flavor fill. A scan run under `keep` still prints `companion` lines, just reaching fewer materials than a `fill` pass reaches, because there are no flavor-filled albedos left for a companion to key off: on the Pirate Pack, the atlas companion reaches 545 models under `fill` and 472 under `keep`, which is a measured consequence of `keep` filling nothing, not a shortfall in the companion binding. Judge whether a companion table is actually dead with `--untextured fill` rather than `keep`, since a companion whose atlas is only ever reached through a flavor fill would read as `DEAD` under `keep` for that reason alone. Nothing is lost the other way, since a companion can never rescue a bare material to begin with: it hangs off an albedo, so there has to be one already, which is why the counts under [Filling, keeping or dropping untextured models](#filling-keeping-or-dropping-untextured-models) are the same with companions as without.
+
+**Reading the report.** A plain `--scan-materials` prints one line per binding under each pack:
+
+```
+     companion PolygonFantasyKingdom_01_A.png   -> emission PolygonFantasyKingdom_01_Emmisive.png  (1978 models)
+     sibling   PolygonFantasyKingdom_01_B.png   -> emission PolygonFantasyKingdom_01_Emmisive.png  (0 models wear it; a generated sibling will)
+     candidates 6 unbound companion map(s): Grass_02_Normals.png, Grass_03_Normals.png, Ground_Base_01_Normals.png, PolygonFantasyKingdom_02_Normals.png, Sand_02_Normal.png, Sand_03_Normals.png
+```
+
+A `companion` line means the binding reached materials the pack's models actually wear, and says how many. A `sibling` line means nothing wears that atlas today but it is a member of a flavor set some observed material drew from, so the manifest pass will still generate a `.tres` for it with the map on; that is a fact about what gets written, not a warning. A `DEAD companion` line means the binding reaches nothing at all and should be fixed or removed, and like every other `DEAD` verdict it is only printed by a run that could have watched it fire. The `candidates` line is the authoring worklist: every file the pack ships whose name reads as an emissive or a normal map that nothing binds and no entry claims. Across the 22 packs here that is 91 `companion` lines, 101 `sibling` lines, no dead ones, and 187 candidates still unbound.
+
+The worklist detector is deliberately loose about spelling, because a false positive costs a glance while a false negative is a map nobody ever notices is missing. Synty ships `Emissive`, `Emmisive`, `Emmision`, `Normals`, `Normal` and one lone `PolygonGangWarfare_Leaves_Nrml.png`, and FantasyKingdom's `PolygonFantasyKingdom_01_Emmisive.png` was invisible to the worklist until it learned the doubled m.
+
+**Why every binding is recorded with its evidence.** A wrong pairing is silent. It ships a real map on a real atlas and the model renders, just wrong, which is far harder to notice than a missing one, so each pack's entry carries a `_verification` block saying what was measured rather than leaving the pairing to be read off the filenames. That is not caution for its own sake; the filenames are wrong often enough that reading a pairing off them would have gone wrong in at least four packs:
+
+- **Casino.** `HotelWall_01_normals` fits `HotelWall_01` through `_04` and `HotelWall_02_normals` fits `_05` through `_07`, which correlating each map's relief against each sheet's edges separates by two orders of magnitude. `HotelWall_03_normals` through `_07_normals` are not walls at all: amplified, they are a triangulated star, drapery waves, a chevron, a hexagon grid and vertical reeds.
+- **FantasyKingdom.** The two atlas normals are named backwards. `_01_Normals` is the map for families 01, 02 and 03 and `_02_Normals` is the map for family 04, which the numbering suggests the other way round. The two sheets are identical except in one tile, and that tile is plain plaster on the first three families and brick on the fourth.
+- **Street Racer.** The four `PolygonStreetRacer_Texture_Emissive_0N` sheets are not one emissive per numbered atlas family. They are four neon colorways of the same swatch strip, the same four colors rotated by one cell each, and only `_01` lands on the sheets as they shipped.
+- **Nature.** `emissive.png` and `Leaves_Willow_EmissiveTexture.png` are grayscale coverage masks rather than glows: their lit pixels are 100 percent gray and their lit masks match the alpha channels of two leaf cards the pack already binds as cutouts. Declaring either would make a willow drape shine flat gray, so this pack binds none of its eleven candidates.
+
+**A large unbound count is a correct outcome**, not a shortfall, which is why the `candidates` line is a worklist and not an error. Most of the 187 fall into three groups. The largest is a real map whose albedo no FBX in the pack ever binds: nine of Casino's 32 are emissives for `PolygonCasino_Texture_02` through `_04`, atlases nothing in the pack wears, and declaring one would be dead on arrival. The next is a file that is not a companion at all, like Nature's two coverage masks above, or `BasePlane_initialShadingGroup_Emissive.png`, which is named after a Maya default shading group on a ground plane and has no albedo in the pack to belong to. The last is a shader mask, a map an engine's own water or effect material samples rather than one a glTF channel can bind: Street Racer's `Water_Normal_Map.png` is a real tangent space normal that correlates with nothing the pack ships. A smaller group sits beside those three, the alternate for a channel that can only hold one map, which is what three of Street Racer's four neon emissives are. Every candidate should end up either bound or knowingly left; none should merely go unnoticed, which is the whole reason the line is printed.
 
 ## LOD chains
 
@@ -428,9 +489,9 @@ A `bind` entry's `material` and, optionally, `model` are glob patterns too, but 
 
 **Order matters, and `model` scoping is why.** `bind` is an ordered list, and the first entry whose `model` and `material` both match wins, so a narrow model-scoped rule can sit above a broader one without the broader one undoing it. FantasyKingdom's `PolygonCastle_GLASS` is why the option exists: the same bare name means real glass on the preset windmill, and means an entire building body stripped of its real material on the other 15 `SM_Bld_Preset_*_Optimized` presets (see [Materials that name no texture at all](#materials-that-name-no-texture-at-all)), and the UV evidence for filling it with `Atlas` was only ever gathered for that family. Scoping the rule to `model: SM_Bld_Preset_*` keeps the fix inside the family the evidence covers, rather than asserting pack-wide that a material named `PolygonCastle_GLASS` always means the castle atlas; the accepted cost is that the windmill's own glass is filled the same way as the fifteen broken bodies, since nothing in a bare material's name distinguishes the two.
 
-**Filling renames the material after its new texture**, the same way any resolved reference does, so it merges with any material that already wears that texture correctly. Before this feature, `SM_Bld_Castle_Wall_Window_Big_01.glb` carried a correctly textured atlas material alongside a second material named `Wall`, bare, because Synty's export left its wall body pointing at nothing. Filled, that material is renamed `Wall_Brick_01` and merges into the same manifest entry as every other material that already resolved to `Wall_Brick_01.png` on its own; the bare `Wall` disappears from the manifest and `Wall_Brick_01`'s usage count grows instead. `SM_Bld_Castle_Wall_Window_Big_01.glb` now carries two textured materials, `PolygonFantasyKingdom_01_A_A92_R75_M50` and `Wall_Brick_01`.
+**Filling renames the material after its new texture**, the same way any resolved reference does, so it merges with any material that already wears that texture correctly. Before this feature, `SM_Bld_Castle_Wall_Window_Big_01.glb` carried a correctly textured atlas material alongside a second material named `Wall`, bare, because Synty's export left its wall body pointing at nothing. Filled, that material is renamed after `Wall_Brick_01.png` and merges into the same manifest entry as every other material that already resolved to that texture on its own; the bare `Wall` disappears from the manifest and the filled name's usage count grows instead. `SM_Bld_Castle_Wall_Window_Big_01.glb` now carries two textured materials, `PolygonFantasyKingdom_01_A_Emmisive_Normals_A92_R75_M50` and `Wall_Brick_01_Normals`. Both names carry a companion's qualifiers as well as their own, because this pack declares an emissive and a normal for its atlas and a normal for each wall; see [Companion maps](#companion-maps).
 
-**Every set member ships regardless of mode.** FantasyKingdom's manifest carries all five wall flavors, each in a plain and an `_R69_M50` qualified form: `Wall_Brick_01`, `Wall_Dungeon_01`, `Wall_Evil_01`, `Wall_Large_Brick_01` and `Wall_Stucco_01`. Eight of those ten materials are used by zero models; they exist purely so a Godot project can point a model's surface at a different one, which is the entire point of shipping a curated set rather than only the one default. Authoring one is what `--untextured keep` and `--scan-report` are for together: `keep` turns filling off so a scan shows every material exactly as bare as its FBX left it, and `--scan-report PATH` dumps that as JSON per model rather than aggregated per pack, which is what a `model`-scoped `bind` entry has to be written from rather than guessed at:
+**Every set member ships regardless of mode.** FantasyKingdom's manifest carries all five wall flavors, each in a plain and an `_R69_M50` qualified form: `Wall_Brick_01_Normals`, `Wall_Dungeon_01_Normals`, `Wall_Evil_01_Normals`, `Wall_Large_Brick_01_Normals` and `Wall_Stucco_01_Normals`. Eight of those ten materials are used by zero models; they exist purely so a Godot project can point a model's surface at a different one, which is the entire point of shipping a curated set rather than only the one default. Authoring one is what `--untextured keep` and `--scan-report` are for together: `keep` turns filling off so a scan shows every material exactly as bare as its FBX left it, and `--scan-report PATH` dumps that as JSON per model rather than aggregated per pack, which is what a `model`-scoped `bind` entry has to be written from rather than guessed at:
 
 ```bash
 python synty_convert.py --scan-materials --untextured keep --scan-report scan.json --packs PolygonFantasyKingdom
@@ -587,7 +648,7 @@ Its FBX binds no texture, so the alpha cutout that shapes each leaf card has not
 Its FBX bound no texture to begin with, so there was nothing to carry across, and by default the converter already tries to fix it. Check the model's materials in `materials/<pack>/materials.json`: an entry with `albedo_color` and no `albedo_texture` still has no flavor set covering it. Where the missing atlas is a single obvious texture reference, name it in [texture_overrides.json](#fixing-unresolved-textures); where the choice is between several shipped alternatives, or the material references no file at all, add a set and a binding to [material_overrides.json](#flavor-sets-and-default-textures) instead. To leave what is still bare out of the output rather than fix it, convert with [`--untextured drop` or `fill-or-drop`](#filling-keeping-or-dropping-untextured-models).
 
 **`ASCII FBX files are not supported`**
-Not fixable here. Blender's importer reads binary FBX only, and Synty ships a handful of models in the ASCII variant by mistake: a binary file begins `Kaydara FBX Binary`, an ASCII one begins `; FBX 7.x.0 project file`. Across the full catalogue this is 21 models, 18 of them in Horror Carnival, and none of them ships a binary counterpart anywhere in its pack. The run names every one under its pack in the failure summary, and the rest of the pack converts normally. Re-export them as binary from a tool that can read ASCII FBX, or ask Synty for a corrected drop.
+Not fixable here. Blender's importer reads binary FBX only, and Synty ships a handful of models in the ASCII variant by mistake: a binary file begins `Kaydara FBX Binary`, an ASCII one begins `; FBX 7.x.0 project file`. Across the full catalog this is 21 models, 18 of them in Horror Carnival, and none of them ships a binary counterpart anywhere in its pack. The run names every one under its pack in the failure summary, and the rest of the pack converts normally. Re-export them as binary from a tool that can read ASCII FBX, or ask Synty for a corrected drop.
 
 **Godot is importing my source FBX**
 Keep `synty_packs_fbx/` outside your Godot project, or drop an empty `.gdignore` file in it.
