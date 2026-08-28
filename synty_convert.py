@@ -367,6 +367,17 @@ def channel_of(entry, name):
     return (entry.get("channels") or {}).get(name) or {}
 
 
+def companion_named(path):
+    """True when a texture's name reads as an emissive or normal map rather than an albedo.
+
+    Name only, and deliberately loose. This decides what goes on the authoring worklist, not
+    what gets bound, so a false positive costs a glance while a false negative means a map
+    nobody ever notices is missing.
+    """
+    stem = Path(path).stem.lower()
+    return "emissi" in stem or "normal" in stem or stem.endswith("_bump")
+
+
 def apply_channels(record, entry, output_root, res_prefix):
     """Write the emission and normal keys a material's channels imply onto a manifest record.
 
@@ -583,11 +594,19 @@ def report_materials(totals, contexts, judge_bindings=True):
     a curated table in material_overrides.json that silently stops matching is the main way
     these files rot.
 
+    The same is true of companions: it names which declared emissive or normal map actually
+    reached a material and how many models wore it, flags any declared companion that reached
+    none, and lists the shipped textures that read as a companion map but that no material
+    wears and no companion entry claims. That last line is the worklist this report exists to
+    produce, not a byproduct of it: an unbound map has no other symptom, so without a line
+    naming it, it stays missing.
+
     A DEAD verdict is an absence claim, and only a run that could have seen a binding fire
     is entitled to make one: `keep` and `drop` never hand the worker a binding table at all,
     and an incremental run only examined the models it actually reconverted. `judge_bindings`
     tells this function which kind of run it was; when it is false the DEAD check is skipped
-    entirely rather than printed on evidence that was never gathered.
+    entirely rather than printed on evidence that was never gathered. The same holds for a
+    companion that never reached a material.
     """
     if not any(totals.materials.values()):
         return
@@ -642,6 +661,44 @@ def report_materials(totals, contexts, judge_bindings=True):
                   f"default {Path(sets[name]['default']).name}")
         for (binding, name, flavor), count in sorted(filled.items(), key=lambda i: -i[1]):
             print(f"     filled   {binding:<24} -> {name}  ({count} files, flavor {flavor})")
+        # Which companions actually reached a material. Read off the observed channels rather
+        # than off the declaration, so an entry that resolves against the texture index but
+        # that nothing in the pack wears is still reported dead.
+        companions = ((contexts.get(pack) or {}).get("materials") or {}).get("companions") or {}
+        worn = collections.Counter()
+        for material in materials.values():
+            albedo = channel_of(material, "albedo").get("member")
+            for channel in material_flavors.COMPANION_CHANNELS:
+                if channel_of(material, channel).get("method") == "companion":
+                    worn[(albedo, channel)] += material["used_by"]
+        for (albedo, channel), count in sorted(worn.items(), key=lambda item: -item[1]):
+            target = (companions.get(albedo) or {}).get(channel, "?")
+            print(f"     companion {Path(albedo).name:<32} -> {channel} "
+                  f"{Path(target).name}  ({count} models)")
+        if judge_bindings:
+            for albedo, declared in sorted(companions.items()):
+                for channel in sorted(declared):
+                    if (albedo, channel) not in worn:
+                        print(f"     DEAD     companion '{albedo}' {channel} reached no "
+                              f"material; remove it from material_overrides.json or fix "
+                              f"its glob")
+        # The authoring worklist: maps the pack ships that nothing has yet been told to use.
+        # A candidate is not a defect, since several are genuinely unbindable, but every one
+        # of them should be either bound or knowingly left, never merely unnoticed.
+        textures = (contexts.get(pack) or {}).get("textures") or []
+        source_root = (contexts.get(pack) or {}).get("source_root") or ""
+        bound = {found.get("member") for material in materials.values()
+                 for name in ("albedo", "emission", "normal", "alpha")
+                 for found in [channel_of(material, name)] if found.get("member")}
+        claimed = {target for declared in companions.values() for target in declared.values()}
+        candidates = sorted(
+            name for name in
+            (material_flavors.relative(path, source_root) for path in textures)
+            if companion_named(name) and name not in bound and name not in claimed)
+        if candidates:
+            shown = ", ".join(Path(name).name for name in candidates[:6])
+            more = f" ... and {len(candidates) - 6} more" if len(candidates) > 6 else ""
+            print(f"     candidates {len(candidates)} unbound companion map(s): {shown}{more}")
         # A binding that never fired is either a typo'd model/material glob or a set that
         # nothing in this pack ever needs, and either way a human should look at it rather
         # than the table quietly doing nothing forever.

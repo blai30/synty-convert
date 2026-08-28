@@ -31,6 +31,33 @@ def run_report(totals, contexts):
     return stdout.getvalue()
 
 
+def make_totals(materials):
+    """A Totals carrying only what report_materials reads: the per-pack materials dict."""
+    totals = synty_convert.Totals()
+    totals.materials = materials
+    return totals
+
+
+def companion_material_entry(albedo_member, used_by=1, emission=None, normal=None):
+    """One entry of totals.materials, as the worker produced it plus the CLI's bookkeeping.
+
+    Distinct from material_entry above, which only exercises a bare albedo channel for
+    binding tests: companion reporting reads the emission and normal channels too, and the
+    channel filler always writes the full surface-property shape alongside them.
+    """
+    channels = {"albedo": {"member": albedo_member, "texture_source": albedo_member,
+                           "texture": "/out/Pack/" + albedo_member, "reference": None,
+                           "method": "exact"}}
+    if emission:
+        channels["emission"] = emission
+    if normal:
+        channels["normal"] = normal
+    return {"channels": channels, "used_by": used_by, "sources": {"lambert1"},
+            "source": "lambert1", "color": [1.0, 1.0, 1.0], "alpha": 1.0,
+            "emission_color": [0.0, 0.0, 0.0], "emission_strength": 1.0,
+            "roughness": 0.5528, "metallic": 0.0, "normal_strength": 1.0}
+
+
 class FilledSurvivesTheMerge(unittest.TestCase):
     """Regression test for the race the previous fix repaired.
 
@@ -123,6 +150,135 @@ class UntexturedCountExcludesFills(unittest.TestCase):
         contexts = {PACK: {"materials": {"sets": {}, "bind": []}}}
         output = run_report(totals, contexts)
         self.assertIn("0 untextured", output)
+
+
+class CompanionReporting(unittest.TestCase):
+
+    # An absolute source root, so the fixtures respect the shape material_flavors.relative
+    # expects: the textures index holds absolute paths, and relative() converts them against
+    # this root into the pack-relative POSIX strings a context otherwise uses throughout.
+    SOURCE_ROOT = "C:/Source/Pack"
+
+    def texture_path(self, name):
+        """An absolute path under SOURCE_ROOT, the shape the textures index holds."""
+        return f"{self.SOURCE_ROOT}/{name}"
+
+    def report(self, materials, companions, judge=True, textures=None, source_root=None):
+        totals = make_totals(materials={"Pack": materials})
+        contexts = {"Pack": {"materials": {"sets": {}, "bind": [], "companions": companions},
+                             "textures": textures or [],
+                             "source_root": source_root or self.SOURCE_ROOT}}
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            synty_convert.report_materials(totals, contexts, judge_bindings=judge)
+        return buffer.getvalue()
+
+    def test_a_companion_that_fired_is_named_with_its_count(self):
+        materials = {"Atlas_01_A_Emissive_01": companion_material_entry(
+            "Textures/Atlas_01_A.png", used_by=12,
+            emission={"member": "Textures/Emissive_01.png", "method": "companion",
+                      "texture": "/out/Pack/Textures/Emissive_01.png"})}
+        output = self.report(materials, {"Textures/Atlas_01_A.png":
+                                         {"emission": "Textures/Emissive_01.png"}})
+        self.assertIn("companion", output)
+        self.assertIn("Emissive_01.png", output)
+        self.assertIn("(12 models)", output)
+
+    def test_a_companion_nothing_wore_is_reported_dead(self):
+        # The failure mode this exists to catch: an atlas gets renamed in a pack update and
+        # the entry keeps resolving against the texture index while no material wears it.
+        materials = {"Atlas_02_A": companion_material_entry("Textures/Atlas_02_A.png", used_by=3)}
+        output = self.report(materials, {"Textures/Atlas_01_A.png":
+                                         {"emission": "Textures/Emissive_01.png"}})
+        self.assertIn("DEAD", output)
+        self.assertIn("Textures/Atlas_01_A.png", output)
+
+    def test_dead_is_not_claimed_on_a_run_that_could_not_observe_it(self):
+        materials = {"Atlas_02_A": companion_material_entry("Textures/Atlas_02_A.png", used_by=3)}
+        output = self.report(materials, {"Textures/Atlas_01_A.png":
+                                         {"emission": "Textures/Emissive_01.png"}},
+                             judge=False)
+        self.assertNotIn("DEAD", output)
+
+    def test_an_unclaimed_emissive_texture_is_a_candidate(self):
+        # Nothing in the pack references or claims this map, so it belongs on the
+        # authoring worklist.
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        output = self.report(materials, {},
+                             textures=[self.texture_path("Textures/Roof_Emissive_01.png")])
+        self.assertIn("candidates 1 unbound companion map(s)", output)
+        self.assertIn("Roof_Emissive_01.png", output)
+
+    def test_a_texture_bound_by_a_non_albedo_channel_is_excluded(self):
+        # The exclusion gathers members across albedo, emission, normal and alpha; a bug
+        # that only checked albedo would still let a normal-bound texture through here.
+        materials = {"Wall_01": companion_material_entry(
+            "Textures/Wall_01.png",
+            normal={"member": "Textures/Wall_01_Normal.png", "method": "exact",
+                    "texture": "/out/Pack/Textures/Wall_01_Normal.png"})}
+        output = self.report(materials, {}, textures=[
+            self.texture_path("Textures/Wall_01_Normal.png"),
+            self.texture_path("Textures/Roof_Emissive_01.png")])
+        self.assertIn("candidates 1 unbound companion map(s)", output)
+        self.assertIn("Roof_Emissive_01.png", output)
+        self.assertNotIn("Wall_01_Normal.png", output)
+
+    def test_a_texture_claimed_by_a_companion_entry_is_excluded(self):
+        # Claimed means the texture appears as a companion VALUE, regardless of whether any
+        # material actually wears it yet.
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        companions = {"Textures/Atlas_02_A.png": {"emission": "Textures/Emissive_02.png"}}
+        output = self.report(materials, companions, textures=[
+            self.texture_path("Textures/Emissive_02.png"),
+            self.texture_path("Textures/Emissive_03.png")])
+        self.assertIn("candidates 1 unbound companion map(s)", output)
+        self.assertIn("Emissive_03.png", output)
+        self.assertNotIn("Emissive_02.png", output)
+
+    def test_a_texture_named_like_neither_map_is_never_a_candidate(self):
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        output = self.report(materials, {}, textures=[
+            self.texture_path("Textures/PolygonCasino_Texture_01_A.png")])
+        self.assertNotIn("candidates", output)
+
+    def test_more_than_six_candidates_are_truncated_with_a_correct_remainder(self):
+        # Nine unbound, unclaimed emissive maps: the line must name the first six sorted by
+        # name and report the remaining three as "and 3 more", not any other split.
+        letters = "ABCDEFGHI"
+        names = [f"Textures/Wall_{letter}_Emissive.png" for letter in letters]
+        materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
+        output = self.report(materials, {},
+                             textures=[self.texture_path(name) for name in names])
+        self.assertIn("candidates 9 unbound companion map(s)", output)
+        for letter in "ABCDEF":
+            self.assertIn(f"Wall_{letter}_Emissive.png", output)
+        for letter in "GHI":
+            self.assertNotIn(f"Wall_{letter}_Emissive.png", output)
+        self.assertIn("and 3 more", output)
+
+
+class CompanionNamed(unittest.TestCase):
+    """companion_named decides the authoring worklist, so its name recognition is load-bearing:
+    a false negative here is a map nobody ever notices is missing.
+    """
+
+    def test_recognizes_the_emissive_and_normal_spellings_the_packs_actually_ship(self):
+        companion_named_examples = (
+            "Wall_Brick_01_Normals",
+            "Sand_02_Normal",
+            "PolygonCasino_Emissive_01_A",
+            "HotelWall_Emissive",
+            "Dungeons_Texture_FloorTiles_Normal",
+        )
+        for name in companion_named_examples:
+            with self.subTest(name=name):
+                self.assertTrue(synty_convert.companion_named(name))
+
+    def test_rejects_an_ordinary_atlas_name(self):
+        ordinary_names = ("PolygonCasino_Texture_01_A", "Wall_Brick_01")
+        for name in ordinary_names:
+            with self.subTest(name=name):
+                self.assertFalse(synty_convert.companion_named(name))
 
 
 if __name__ == "__main__":

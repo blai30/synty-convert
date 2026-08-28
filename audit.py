@@ -26,10 +26,24 @@ CHUNK_JSON = 0x4E4F534A
 LOD_SUFFIX = re.compile(r"^(?P<base>.+)_LOD(?P<level>\d+)$", re.IGNORECASE)
 
 # What a generated flavor variant is allowed to hold differently from the base it was
-# copied from. It is its base wearing a different texture, so the texture and the names
-# and counts that follow from it may differ, and nothing else may.
+# copied from. It is its base wearing a different texture, so the texture, the companion
+# maps that belong to that texture, and the names and counts that follow from them may
+# differ, and nothing else may.
 VARIANT_KEYS = {"name", "used_by", "variant_of", "source_names", "albedo_texture",
-                "reference", "match"}
+                "emission_texture", "emission_energy", "emission_color",
+                "normal_texture", "normal_scale"}
+
+
+def is_diagnostic(key):
+    """True for a key recording how an observed material's own reference resolved.
+
+    A generated variant has no FBX reference of its own, so ``flavor_variants`` strips all
+    of these from a sibling while its base keeps them. Every one of them therefore differs,
+    and none of them describes anything the Godot generator reads. This mirrors the rule in
+    ``synty_convert.flavor_variants`` deliberately: if the two ever disagree, a sibling
+    starts failing the audit for a key nothing renders.
+    """
+    return key in ("reference", "match") or key.endswith(("_reference", "_match"))
 
 
 def gltf_of(path):
@@ -123,7 +137,8 @@ def audit_manifests(root, dst, res_prefix, failures, stats):
                 else:
                     differs = {key for key in set(entry) | set(by_name[base])
                                if entry.get(key) != by_name[base].get(key)}
-                    unexpected = differs - VARIANT_KEYS
+                    unexpected = {key for key in differs - VARIANT_KEYS
+                                  if not is_diagnostic(key)}
                     if unexpected:
                         failures["variant differs from its base beyond its texture"].append(
                             f"{path}: {entry['name']} ({sorted(unexpected)})")
