@@ -53,7 +53,7 @@ class Match:
 def tokenize(stem):
     """Split a texture stem into comparable tokens.
 
-    Lowercases, splits on separators and letter/digit boundaries, normalises plurals,
+    Lowercases, splits on separators and letter/digit boundaries, normalizes plurals,
     strips leading zeros from numbers, applies variant synonyms and drops noise.
     """
     parts = re.split(r"[^A-Za-z0-9]+", stem)

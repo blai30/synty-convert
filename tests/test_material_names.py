@@ -89,7 +89,7 @@ class CanonicalName(unittest.TestCase):
                 "normal": channel("/packs/FK/Textures/Normals/Wall_Brick_01_Normals.png")})),
             "Wall_Brick_01_Normals")
 
-    def test_emissive_colour_qualifies_when_no_map_is_bound(self):
+    def test_emissive_color_qualifies_when_no_map_is_bound(self):
         self.assertEqual(
             material_names.canonical_name(record(
                 channels={"albedo": channel("/packs/FK/Textures/Atlas_01_A.png")},
@@ -116,8 +116,8 @@ class CanonicalName(unittest.TestCase):
             material_names.canonical_name(record(channels={"albedo": atlas}, metallic=0.0)),
             "Atlas_01_A")
 
-    def test_untextured_material_is_named_for_its_colour(self):
-        # Nothing else names the colour, and colour is all an untextured material is.
+    def test_untextured_material_is_named_for_its_color(self):
+        # Nothing else names the color, and color is all an untextured material is.
         self.assertEqual(
             material_names.canonical_name(record(source="Lambert", color=[0.5, 0.5, 0.5],
                                                  alpha=0.45)),

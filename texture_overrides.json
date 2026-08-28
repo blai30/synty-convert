@@ -68,11 +68,11 @@
     "Dungeons_Texture": "POLYGON_Dungeon_Pack_SourceFiles_v3::Textures/Dungeons_Texture_01.png"
   },
   "POLYGON_Pirate_Pack_SourceFiles_v3": {
-    "_comment": "Every material in this pack asks for Texture_01.psd, a file it never shipped; what it ships is Texture_01_A through Texture_04_C. All twelve are recolours of one island layout, edge correlation 0.954 to 0.992 across all 66 pairs, so the reference identifies the family unambiguously and _01_A is its head.",
+    "_comment": "Every material in this pack asks for Texture_01.psd, a file it never shipped; what it ships is Texture_01_A through Texture_04_C. All twelve are recolors of one island layout, edge correlation 0.954 to 0.992 across all 66 pairs, so the reference identifies the family unambiguously and _01_A is its head.",
     "Texture_01": "Textures/Texture_01_A.png"
   },
   "POLYGON_Horror_Carnival_SourceFiles_v3": {
-    "_comment": "The atlas ships under Textures/Alts only, so nothing matches the plain name the FBX asks for. _01 is the right family rather than merely the referenced one: SM_Prop_Barrel_02 samples grey 90,90,88 on _01_A and pink 189,131,180 on _02_A.",
+    "_comment": "The atlas ships under Textures/Alts only, so nothing matches the plain name the FBX asks for. _01 is the right family rather than merely the referenced one: SM_Prop_Barrel_02 samples gray 90,90,88 on _01_A and pink 189,131,180 on _02_A.",
     "PolygonHorrorCarnival_Texture_01": "Alts/PolygonHorrorCarnival_Texture_01_A.png",
     "PolygonHorrorCarnival_Texture_01_Emerson": "Alts/PolygonHorrorCarnival_Texture_01_A.png",
     "Saw_Teeth": "Decals/Saw_Teeth_01.png",
@@ -81,7 +81,7 @@
     "cobweb1": "Decals/Spiderweb_01.png"
   },
   "POLYGON_Casino_SourceFiles_v4": {
-    "_comment": "The atlas ships under Textures/Alts, and four artist working names all denote the same sheet. SM_Bld_Bar_Wall_01 spans U 0.134 to 0.137 V 0.284 to 0.378 and samples a light grey 173,178,185 with no black, which is the wall trim island.",
+    "_comment": "The atlas ships under Textures/Alts, and four artist working names all denote the same sheet. SM_Bld_Bar_Wall_01 spans U 0.134 to 0.137 V 0.284 to 0.378 and samples a light gray 173,178,185 with no black, which is the wall trim island.",
     "PolygonCasino_Texture_01": "Alts/PolygonCasino_Texture_01_A.png",
     "PolygonCasino_Texture_01_ASHE": "Alts/PolygonCasino_Texture_01_A.png",
     "PolygonCasino_Texture_01_ASHEv2": "Alts/PolygonCasino_Texture_01_A.png",
@@ -89,7 +89,7 @@
     "PolygonCasino_Texture_01_Emerson": "Alts/PolygonCasino_Texture_01_A.png"
   },
   "POLYGON_War_SourceFiles_v4": {
-    "_comment": "PolygonWar_Texture.psd and its GoodVersion and TEMP siblings are all authoring names for the shipped PolygonWar_Texture_01_A. SM_Bld_Barracks_01 spans U -0.003 to 0.488 V 0.228 to 0.740 and samples weathered timber 129,124,119 with cream doors 179,173,164 and blue grey glazing 126,161,173; SM_Bld_Bunker_02 samples concrete 146,141,134. Nothing lands in black padding.",
+    "_comment": "PolygonWar_Texture.psd and its GoodVersion and TEMP siblings are all authoring names for the shipped PolygonWar_Texture_01_A. SM_Bld_Barracks_01 spans U -0.003 to 0.488 V 0.228 to 0.740 and samples weathered timber 129,124,119 with cream doors 179,173,164 and blue gray glazing 126,161,173; SM_Bld_Bunker_02 samples concrete 146,141,134. Nothing lands in black padding.",
     "PolygonWar_Texture": "PolygonWar_Texture_01_A.png",
     "PolygonWar_Texture_GoodVersion": "PolygonWar_Texture_01_A.png",
     "PolygonWar_Texture_01": "PolygonWar_Texture_01_A.png",
@@ -105,7 +105,7 @@
     "Ships_Master": "Ship_Texture.png"
   },
   "POLYGON_Street_Racer_SourceFiles_v3": {
-    "_comment": "Veh_Tex_Exp.psd is the vehicle atlas every unpainted car body and workshop prop reads. The liveries are aligned variants of one layout rather than per vehicle art: SM_Veh_Hatch_01's engine bay samples an identical 101.1,95.1,95.1 on Veh_Tex_05, Veh_Tex_16 and the pack atlas, while its body and doors differ between the two liveries, which is paint changing over a shared layout. Race_Grey is the neutral default because the numbering starts at Race_Purple rather than at a base colour; every other livery ships as a variant to swap to. Texture_Master and Texture_Tom are authoring names for the pack atlas: SM_Prop_Barrier_Cone_01 samples cone orange 184,81,48 on _01_A and SM_Env_BoatRamp_01 samples concrete 114,107,95.",
+    "_comment": "Veh_Tex_Exp.psd is the vehicle atlas every unpainted car body and workshop prop reads. The liveries are aligned variants of one layout rather than per vehicle art: SM_Veh_Hatch_01's engine bay samples an identical 101.1,95.1,95.1 on Veh_Tex_05, Veh_Tex_16 and the pack atlas, while its body and doors differ between the two liveries, which is paint changing over a shared layout. Race_Grey is the neutral default because the numbering starts at Race_Purple rather than at a base color; every other livery ships as a variant to swap to. Texture_Master and Texture_Tom are authoring names for the pack atlas: SM_Prop_Barrier_Cone_01 samples cone orange 184,81,48 on _01_A and SM_Env_BoatRamp_01 samples concrete 114,107,95.",
     "PolygonStreetRacer_Veh_Tex_Exp": "Vehicles/PolygonStreetRacer_Veh_Tex_05_Race_Grey.png",
     "PolygonStreetRacer_Texture_Master": "PolygonStreetRacer_Texture_01_A.png",
     "PolygonStreetRacer_Texture_Tom": "PolygonStreetRacer_Texture_01_A.png",

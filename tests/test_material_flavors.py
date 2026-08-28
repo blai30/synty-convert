@@ -96,7 +96,7 @@ class ExpandSets(unittest.TestCase):
         self.assertTrue(any("default" in w for w in warnings), warnings)
 
     def test_cutout_flag_is_carried_through(self):
-        # A set declared with cutout: true is a card whose colour is also its coverage, and
+        # A set declared with cutout: true is a card whose color is also its coverage, and
         # that has to survive expand_sets or the flavor fill has no way to know to bind it
         # as a mask as well as an albedo.
         warnings = []

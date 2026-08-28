@@ -489,7 +489,7 @@ def resolve_materials(context, source, warnings):
     for material in bpy.data.materials:
         info = describe_material(material)
         references = dict(info["references"])
-        # A mask is nearly always the very file the material is coloured with, so resolving
+        # A mask is nearly always the very file the material is colored with, so resolving
         # it a second time would only repeat the work and any warning that came with it.
         mask_is_albedo = references["alpha"] and references["alpha"] == references["albedo"]
         if mask_is_albedo:
@@ -502,13 +502,13 @@ def resolve_materials(context, source, warnings):
                   ("source", "color", "alpha", "emission_color", "emission_strength",
                    "roughness", "metallic", "normal_strength")}
         record["channels"] = {name: found for name, found in channels.items() if found}
-        # glTF hangs coverage on the base colour texture, so a material that binds only a
-        # mask has nowhere to put it. The mask becomes its colour as well, which is what the
+        # glTF hangs coverage on the base color texture, so a material that binds only a
+        # mask has nowhere to put it. The mask becomes its color as well, which is what the
         # eleven Military chain-link fences built this way were always going to look like.
         if record["channels"].get("alpha") and not record["channels"].get("albedo"):
             record["channels"]["albedo"] = record["channels"]["alpha"]
         # Last, so a texture the FBX actually named always wins over a declared default,
-        # and so a mask promoted to colour above is not overwritten by one.
+        # and so a mask promoted to color above is not overwritten by one.
         if not (record["channels"].get("albedo") or {}).get("texture_source"):
             filled = flavor_fill(context, source, info["source"], warnings)
             if filled:
@@ -516,7 +516,7 @@ def resolve_materials(context, source, warnings):
                 if filled["cutout"]:
                     # A Synty foliage card is its own coverage: the quad draws one leaf
                     # across the whole of UV space and everything around it is meant to be
-                    # cut away. Binding the colour alone ships the leaf as a solid
+                    # cut away. Binding the color alone ships the leaf as a solid
                     # rectangle, so the same image has to serve as the mask.
                     record["channels"]["alpha"] = filled
         record["transparency"] = transparency_of(record)
@@ -526,10 +526,10 @@ def resolve_materials(context, source, warnings):
 
 
 def texture_image(path, colorspace, cache):
-    """Load a texture once per colour space it is needed in.
+    """Load a texture once per color space it is needed in.
 
-    A mask bound as both colour and coverage has to exist twice, since a normal or alpha map
-    is data and the same file read as colour is not.
+    A mask bound as both color and coverage has to exist twice, since a normal or alpha map
+    is data and the same file read as color is not.
     """
     key = (path, colorspace)
     if key not in cache:
@@ -553,7 +553,7 @@ def build_material(name, record, cache, warnings):
     emission = (channels.get("emission") or {}).get("texture")
     normal = (channels.get("normal") or {}).get("texture")
 
-    # Maya ignores a material's own colour once a file is connected over it, so a value only
+    # Maya ignores a material's own color once a file is connected over it, so a value only
     # applies where no map does.
     bsdf.inputs["Base Color"].default_value = (1.0, 1.0, 1.0, 1.0) if albedo else (*record["color"], 1.0)
     bsdf.inputs["Alpha"].default_value = record["alpha"]
@@ -569,11 +569,11 @@ def build_material(name, record, cache, warnings):
         base_node = tree.nodes.new("ShaderNodeTexImage")
         base_node.image = texture_image(albedo, "sRGB", cache)
         tree.links.new(bsdf.inputs["Base Color"], base_node.outputs["Color"])
-    # glTF carries coverage on the base colour texture's alpha channel rather than in a map
+    # glTF carries coverage on the base color texture's alpha channel rather than in a map
     # of its own, so a mask can only be applied where it is that same texture.
     if mask and base_node is not None:
         if mask != albedo:
-            warnings.append(f"'{name}' masks with a different file than it colours with, "
+            warnings.append(f"'{name}' masks with a different file than it colors with, "
                             f"which glTF cannot express; left opaque")
         elif base_node.image.channels < 4 or base_node.image.depth in {24, 8}:
             warnings.append(f"'{name}' binds '{os.path.basename(mask)}' as a mask but the file "
@@ -840,7 +840,7 @@ def foliage_material(name, path, cutout):
 def apply_foliage_textures(context, source, warnings):
     """Bind the textures a foliage model's FBX declares nothing for, splitting where needed.
 
-    Synty's Nature Biomes foliage exports with its material bindings stripped: one grey
+    Synty's Nature Biomes foliage exports with its material bindings stripped: one gray
     Lambert covers trunk and canopy alike, and since every leaf card maps the whole of UV
     space, the trunk's own UVs sit underneath them and no single image can serve both. The
     parts are separable by geometry though. A leaf card is one quad; a trunk is a single

@@ -75,8 +75,8 @@ func _build(entry: Dictionary, missing: Array[String]) -> StandardMaterial3D:
 		if emission != null:
 			material.emission_texture = emission
 			# The map is the whole of the emission, the way Maya treats a file connected
-			# over a colour. Multiply against white leaves the map exactly as authored,
-			# where the default add operator would lift it by the emission colour.
+			# over a color. Multiply against white leaves the map exactly as authored,
+			# where the default add operator would lift it by the emission color.
 			material.emission = Color.WHITE
 			material.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
 		else:

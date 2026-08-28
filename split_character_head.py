@@ -162,7 +162,7 @@ def fan_fill(mesh, edges, ring, deform, uv_layer):
 
     corners = {}
     if uv_layer is not None:
-        # Every rim vertex sits on neck skin, and Synty atlases are flat colour patches,
+        # Every rim vertex sits on neck skin, and Synty atlases are flat color patches,
         # so the whole cap lands on the one texel the neck already uses.
         for vertex in ring:
             corners[vertex] = next(iter(vertex.link_loops))[uv_layer].uv.copy()

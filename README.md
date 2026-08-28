@@ -38,7 +38,7 @@ Synty FBX do not import cleanly into Godot on their own. The converter deals wit
 - **Duplicated textures.** Synty FBX embed their atlas, so a naive conversion copies a 2048x2048 PNG into every model. The converter references one shared file instead.
 - **Authoring leftovers.** Some models carry a single-key `Take 001` that only restates the import transform, or an Unreal `UCX_` collision hull. Both are dropped. Left in, the take blocks normalization and then reapplies in Godot the very transform normalization exists to remove, and the hull arrives as a visible untextured box over the prop it was meant to bound.
 - **Stacked LOD levels.** The Nature Biomes packs ship each tree and bush as a chain of progressively cheaper meshes, which Godot has no way to read as a chain and therefore renders all at once. Only the finest level is kept; see [LOD chains](#lod-chains).
-- **Card foliage that names no texture.** The same packs export their detailed trees and bushes with the material bindings stripped, leaving one grey Lambert over trunk and canopy alike. Since Synty foliage is alpha cards, that arrives as a white tree with solid quads where the leaves should be. The converter separates the two and binds both; see [Foliage that names no texture](#foliage-that-names-no-texture).
+- **Card foliage that names no texture.** The same packs export their detailed trees and bushes with the material bindings stripped, leaving one gray Lambert over trunk and canopy alike. Since Synty foliage is alpha cards, that arrives as a white tree with solid quads where the leaves should be. The converter separates the two and binds both; see [Foliage that names no texture](#foliage-that-names-no-texture).
 - **Size.** 1039 models across two packs go from 528.7 MB to 152.9 MB, a 71.1% reduction.
 
 ## Requirements
@@ -92,11 +92,11 @@ python synty_convert.py --scan-materials --packs PolygonFantasyKingdom
 PolygonFantasyKingdom: 20 materials  (1 exact, 0 override, 2 heuristic, 9 unresolved, 8 untextured)
    review  PolygonCastle_Texture_01_A.psd -> PolygonFantasyKingdom_01_A (1896 files)
    review  PolygonFantasyKingdon_Texture_Wall_Brick_01.png -> Wall_Brick_01 (1 files)
-   UNRESOLVED  Horse_Texture_01.psd  (colour only; add to texture_overrides.json)
-   UNRESOLVED  WALL.bmp  (colour only; add to texture_overrides.json)
+   UNRESOLVED  Horse_Texture_01.psd  (color only; add to texture_overrides.json)
+   UNRESOLVED  WALL.bmp  (color only; add to texture_overrides.json)
 ```
 
-`review` lines resolved by heuristic and are worth a glance. `UNRESOLVED` means no confident match was found, so that material will carry colour only. See [Fixing unresolved textures](#fixing-unresolved-textures).
+`review` lines resolved by heuristic and are worth a glance. `UNRESOLVED` means no confident match was found, so that material will carry color only. See [Fixing unresolved textures](#fixing-unresolved-textures).
 
 ### 2. Convert
 
@@ -121,7 +121,7 @@ materials/  one materials.json per pack
 
 ### 3. Review the report
 
-The run ends with a per-pack material summary. Anything listed as `UNRESOLVED` becomes a colour-only material. Fix those now if you want them textured, then rerun with `--force`.
+The run ends with a per-pack material summary. Anything listed as `UNRESOLVED` becomes a color-only material. Fix those now if you want them textured, then rerun with `--force`.
 
 ### 4. Copy into your Godot project
 
@@ -247,9 +247,9 @@ Every channel an FBX declares is carried across. The converter reads each one fr
 
 | FBX property | Becomes | Declared across 10,488 source materials |
 | --- | --- | --- |
-| `DiffuseColor` | base colour texture, or the colour where no map is bound | 9,943 |
+| `DiffuseColor` | base color texture, or the color where no map is bound | 9,943 |
 | `TransparentColor` | alpha, cut out at 0.5 | 179 |
-| `EmissiveColor` | emissive texture, or emissive colour | 79 map, 4 colour |
+| `EmissiveColor` | emissive texture, or emissive color | 79 map, 4 color |
 | `NormalMap` / `Bump` | normal map, with tangents exported for those models | 125 |
 | `Shininess` | roughness, as `1 - sqrt(shininess) / 10` | 753 |
 | `ReflectionFactor` | metallic | 710 |
@@ -264,12 +264,12 @@ Materials are still keyed on their atlas, but a material that carries anything b
 PolygonNatureBiomesS2_AridDesert_Texture_01                      the atlas alone
 PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A        the same atlas, plus an emissive map
 PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A_Cutout the same again, masked
-Lambert_A45_808080                                               no atlas: alpha 0.45, grey
+Lambert_A45_808080                                               no atlas: alpha 0.45, gray
 ```
 
 Qualifiers come from the material itself and never from the order files happen to be converted in, so one name means one thing across a whole pack.
 
-Two limits are worth stating. glTF carries coverage on the base colour texture's alpha channel rather than in a map of its own, so a mask has to be the file the material is coloured with. Every Synty material that binds a mask already names the same file, apart from eleven Military fences that name only the mask, which then supplies their colour too. And a mask whose file has no alpha channel cannot be expressed at all; those are warned about and left opaque.
+Two limits are worth stating. glTF carries coverage on the base color texture's alpha channel rather than in a map of its own, so a mask has to be the file the material is colored with. Every Synty material that binds a mask already names the same file, apart from eleven Military fences that name only the mask, which then supplies their color too. And a mask whose file has no alpha channel cannot be expressed at all; those are warned about and left opaque.
 
 Godot imports a normal map correctly on its own, but check the texture's **Import** dock shows **Normal Map** under compression if a surface looks flat.
 
@@ -300,7 +300,7 @@ LODs      dropped 255 coarse level(s) from 132 model(s)
 
 ## Fixing unresolved textures
 
-Synty's FBX reference authoring files that never shipped, so some references cannot be matched. When that happens the material keeps its colour and is reported.
+Synty's FBX reference authoring files that never shipped, so some references cannot be matched. When that happens the material keeps its color and is reported.
 
 Add the mapping to `texture_overrides.json`, keyed by pack folder name, then by the texture stem the FBX asks for. Values are path suffixes matched against the pack's shipped textures:
 
@@ -325,11 +325,11 @@ Sometimes the texture a pack asks for is one **another pack** ships. Synty's bio
 }
 ```
 
-That other pack has to be converted too, since the material points at its mirrored copy under `assets/`. Convert only one of the pair and the run says so and leaves the material colour only.
+That other pack has to be converted too, since the material points at its mirrored copy under `assets/`. Convert only one of the pair and the run says so and leaves the material color only.
 
 The file ships with 83 mappings covering 19 packs, since these are facts about Synty's packs rather than anything project specific. They are the cases where a shipped texture is the unique, obvious counterpart, for example `PolygonScifi_Texture.psd` meaning `PolygonScifi_01_A.png`, or an artist's working copy like `PolygonWesternFrontier_Texture_Mike.psd`. A working file's name is not evidence of what it holds: `RopeBridge.png` is the atlas for 45 Meadow Forest props, none of which is a rope bridge, because the artist named the file in the Tropical Jungle scene that does have one. If you own a pack that is not listed, run `--scan-materials` and add what you find.
 
-What is deliberately **not** mapped here is anything ambiguous between several shipped candidates: guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one. References to packs you do not own, like `PolygonAncientWorlds_Texture_01.png`, have no counterpart to find and stay colour-only regardless. `Wall_01.psd` in FantasyKingdom used to be the example of the first kind, since it could be any of five shipped wall textures; it is mapped now, to `Wall_Brick_01.png`, because that stopped being a guess once `Wall_Brick_01` became the curated default of FantasyKingdom's `Wall` flavor set, the same texture a bare wall material falls back to on its own. See [Flavor sets and default textures](#flavor-sets-and-default-textures) for how that default is chosen, and for the general case of a material naming no texture at all rather than an ambiguous one.
+What is deliberately **not** mapped here is anything ambiguous between several shipped candidates: guessing would put a plausible but wrong texture on the model, which is harder to notice than an obviously untextured one. References to packs you do not own, like `PolygonAncientWorlds_Texture_01.png`, have no counterpart to find and stay color-only regardless. `Wall_01.psd` in FantasyKingdom used to be the example of the first kind, since it could be any of five shipped wall textures; it is mapped now, to `Wall_Brick_01.png`, because that stopped being a guess once `Wall_Brick_01` became the curated default of FantasyKingdom's `Wall` flavor set, the same texture a bare wall material falls back to on its own. See [Flavor sets and default textures](#flavor-sets-and-default-textures) for how that default is chosen, and for the general case of a material naming no texture at all rather than an ambiguous one.
 
 ### Materials that name no texture at all
 
@@ -337,7 +337,7 @@ An unresolved reference is one the matcher could not place. A material can also 
 
 Most are untextured because they were never meant to be textured: glass, water planes, fog rings, sky domes. Foliage is the exception, and it has a file of its own; see below.
 
-Some, though, are whole models that arrive as a flat white or grey blob. Fantasy Kingdom was the worst case: 15 of its 26 `SM_Bld_Preset_*_Optimized` buildings declare exactly one material, usually named `PolygonCastle_GLASS`, because the body material was stripped when Synty exported them; the other 11 either kept both materials or named a single texture that still resolves on its own, and always converted correctly. The FBX itself says nothing about the missing atlas, but the mesh does: every stripped building's UVs span the same 0 to 1 island as the hundreds of models that resolve onto `PolygonFantasyKingdom_01_A` correctly, which is what identifies it. `material_overrides.json` now binds that material to the atlas on every `SM_Bld_Preset_*` model, so these 15 convert correctly too; see [Flavor sets and default textures](#flavor-sets-and-default-textures).
+Some, though, are whole models that arrive as a flat white or gray blob. Fantasy Kingdom was the worst case: 15 of its 26 `SM_Bld_Preset_*_Optimized` buildings declare exactly one material, usually named `PolygonCastle_GLASS`, because the body material was stripped when Synty exported them; the other 11 either kept both materials or named a single texture that still resolves on its own, and always converted correctly. The FBX itself says nothing about the missing atlas, but the mesh does: every stripped building's UVs span the same 0 to 1 island as the hundreds of models that resolve onto `PolygonFantasyKingdom_01_A` correctly, which is what identifies it. `material_overrides.json` now binds that material to the atlas on every `SM_Bld_Preset_*` model, so these 15 convert correctly too; see [Flavor sets and default textures](#flavor-sets-and-default-textures).
 
 ### Filling, keeping or dropping untextured models
 
@@ -350,7 +350,7 @@ Some, though, are whole models that arrive as a flat white or grey blob. Fantasy
 | `drop` | no | yes |
 | `fill-or-drop` | yes | yes |
 
-`keep` is the old, entirely hands-off behaviour, and is also how you audit a pack: `--untextured keep --scan-materials` shows every material exactly as bare as its FBX left it, with no fill in the way. `drop` writes no GLB for a model whose materials bound no texture on any channel, without filling first, and deletes one an earlier run left behind. `fill-or-drop` does both, filling whatever a binding covers and dropping whatever is still bare afterwards:
+`keep` is the old, entirely hands-off behavior, and is also how you audit a pack: `--untextured keep --scan-materials` shows every material exactly as bare as its FBX left it, with no fill in the way. `drop` writes no GLB for a model whose materials bound no texture on any channel, without filling first, and deletes one an earlier run left behind. `fill-or-drop` does both, filling whatever a binding covers and dropping whatever is still bare afterwards:
 
 ```bash
 python synty_convert.py --untextured fill-or-drop --force
@@ -392,9 +392,9 @@ That is `--untextured fill-or-drop`, 380 of 15506 models, or 2.5%, after filling
 
 ## Flavor sets and default textures
 
-Synty ships several real textures for a surface whose choice belongs to the consumer, not the pack: FantasyKingdom alone ships five tileable castle walls and eight roof surfaces, and its `Textures/Alts` folder, Synty's own name for a recolour, carries three palettes of the pack's main atlas. Nothing in an FBX says which one a model should wear, because the choice is meant to be made in the game, not baked into the export. `--untextured fill`, the default, makes that choice for you by filling a bare material with a curated default, and `material_overrides.json` is where that default, and the rest of its set, is declared.
+Synty ships several real textures for a surface whose choice belongs to the consumer, not the pack: FantasyKingdom alone ships five tileable castle walls and eight roof surfaces, and its `Textures/Alts` folder, Synty's own name for a recolor, carries three palettes of the pack's main atlas. Nothing in an FBX says which one a model should wear, because the choice is meant to be made in the game, not baked into the export. `--untextured fill`, the default, makes that choice for you by filling a bare material with a curated default, and `material_overrides.json` is where that default, and the rest of its set, is declared.
 
-Two genuinely different things share this mechanism. A **tileable surface** like `Wall` is five unrelated textures that happen to serve the same role: a bare wall material can wear any one of them and look equally correct. A **colourway alt** like FantasyKingdom's `Atlas` set is Synty's own concept, one atlas repainted in a few palettes; a model wearing it is not choosing a different surface, only a different coat of paint on the same one. Both are real, curated flavor sets, and both work the same way once declared: every member ships as a material regardless of which one a bare material defaults to, which is what makes swapping possible later. Point a model's surface material at a different flavor's `.tres` in Godot and the model wears that flavor instead, because every alternative is already sitting in `materials/<pack>/materials.json`, not generated on demand.
+Two genuinely different things share this mechanism. A **tileable surface** like `Wall` is five unrelated textures that happen to serve the same role: a bare wall material can wear any one of them and look equally correct. A **colorway alt** like FantasyKingdom's `Atlas` set is Synty's own concept, one atlas repainted in a few palettes; a model wearing it is not choosing a different surface, only a different coat of paint on the same one. Both are real, curated flavor sets, and both work the same way once declared: every member ships as a material regardless of which one a bare material defaults to, which is what makes swapping possible later. Point a model's surface material at a different flavor's `.tres` in Godot and the model wears that flavor instead, because every alternative is already sitting in `materials/<pack>/materials.json`, not generated on demand.
 
 **Why curated rather than detected.** Grouping textures by name looks tempting and is wrong more often than it is right. `Bullet_Decal_Metal_01_D` and `Bullet_Decal_Metal_01_N` in the Military pack share every token but one, and a lexical clustering would offer the normal map as a flavor of the diffuse it is actually meant to sit beside, not swap with. NatureBiomes' `WaterNormals_01` and `WaterNormals_02` cluster the same way despite being two maps of one material, not two choices for one. And a pack's `Textures/LOD_Cards` folder, which carries a `treeBirch_01.tga` through `treeBirch_04.tga` in MeadowForest, is a bake per LOD level of one specific tree, not four trees to choose between. `material_overrides.json` exists for the same reason `texture_overrides.json` does: matching by name finds real patterns and wrong ones at the same rate, and a wrong flavor is exactly the plausible-but-incorrect result this tool is built to avoid.
 
@@ -422,7 +422,7 @@ Two genuinely different things share this mechanism. A **tileable surface** like
 }
 ```
 
-A flavor's `members` are path-suffix globs, matched against the pack's shipped textures the same way `texture_overrides.json` matches an override, because a shipped file is found by the tail of its path. `default` names which member a bare material actually gets; a set whose default does not match exactly one of its own members is dropped with a warning rather than guessed at, since the default is the one texture applied without anyone asking for it by name. A set can also declare `"cutout": true`, for a flavor whose members are Synty foliage or netting cards rather than opaque surfaces: such a card has no coverage of its own to cut with until the same image is bound as both colour and mask, so the flag tells the fill to bind it as both rather than colour alone, which would ship the leaf as a solid rectangle.
+A flavor's `members` are path-suffix globs, matched against the pack's shipped textures the same way `texture_overrides.json` matches an override, because a shipped file is found by the tail of its path. `default` names which member a bare material actually gets; a set whose default does not match exactly one of its own members is dropped with a warning rather than guessed at, since the default is the one texture applied without anyone asking for it by name. A set can also declare `"cutout": true`, for a flavor whose members are Synty foliage or netting cards rather than opaque surfaces: such a card has no coverage of its own to cut with until the same image is bound as both color and mask, so the flag tells the fill to bind it as both rather than color alone, which would ship the leaf as a solid rectangle.
 
 A `bind` entry's `material` and, optionally, `model` are glob patterns too, but anchored ones matched against a whole name rather than a path suffix, because a material name or a filename stem is a whole name and not the tail of a path. `model` defaults to `*` when left out, which is most bindings: `Wall*` needs no model scoping, because every material named that way wants the `Wall` flavor regardless of which model wears it.
 
@@ -448,7 +448,7 @@ A flavor's `members` glob that matches no shipped texture is reported too, which
 
 ## Foliage that names no texture
 
-Synty's Nature Biomes packs export their detailed trees and bushes with the material bindings stripped. One grey Lambert covers the whole model, and because that foliage is built from alpha cutout cards, each quad drawing a leaf texture across the whole of UV space, an untextured card has no coverage to cut with. The model arrives white with solid quads where its leaves should be, which is a good deal more broken looking than merely grey.
+Synty's Nature Biomes packs export their detailed trees and bushes with the material bindings stripped. One gray Lambert covers the whole model, and because that foliage is built from alpha cutout cards, each quad drawing a leaf texture across the whole of UV space, an untextured card has no coverage to cut with. The model arrives white with solid quads where its leaves should be, which is a good deal more broken looking than merely gray.
 
 The two halves cannot share a material. A leaf card spans the whole of UV space and the trunk's own UVs sit underneath, so no single image can serve both. They separate cleanly by geometry though: a leaf card is one quad, while a trunk is a single island of hundreds of triangles. The converter splits on island size and binds each half from `foliage_overrides.json`:
 
@@ -472,7 +472,7 @@ Foliage   bound 39 mesh(es) across 25 model(s) whose FBX named no texture
 
 The file ships mappings for 23 models across MeadowForest and TropicalJungle: the birch, fruit and meadow trees, the forest and pohutukawa trees, and the bushes that go with them.
 
-**How the mappings were arrived at**, since guessing a texture is otherwise exactly what this tool refuses to do. Each pack ships a `Textures/LOD_Cards` image per tree, which is a baked render of the finished model and therefore a picture of the answer. Every candidate leaf map was scored against its card's palette, and the method reproduces the two mappings that were already known independently: `leafPatch_01` for the birches, and `pohutukawaLeaf` for the pohutukawas, which is also an exact name match. Trunks were confirmed by sampling each candidate at the trunk's own UV coordinates: on these models a trunk collapses to a single point of the pack atlas, holding the bark colour it was authored with. The birches are the exception, their trunks spanning a whole dedicated bark map.
+**How the mappings were arrived at**, since guessing a texture is otherwise exactly what this tool refuses to do. Each pack ships a `Textures/LOD_Cards` image per tree, which is a baked render of the finished model and therefore a picture of the answer. Every candidate leaf map was scored against its card's palette, and the method reproduces the two mappings that were already known independently: `leafPatch_01` for the birches, and `pohutukawaLeaf` for the pohutukawas, which is also an exact name match. Trunks were confirmed by sampling each candidate at the trunk's own UV coordinates: on these models a trunk collapses to a single point of the pack atlas, holding the bark color it was authored with. The birches are the exception, their trunks spanning a whole dedicated bark map.
 
 Two things are deliberately left alone. **Palms, bananas, cacti and succulents** in these packs are not card foliage at all but solid geometry wearing a dedicated full-UV texture, so they are a different problem and stay untextured. And in the base **Nature** pack, `Trunk_FF0000` and `Leave_34FF00` are already separate materials on separate surfaces, so those models need no splitting and are better fixed by hand in Godot, or by keying an override on the material name, which this file does not yet do.
 
@@ -517,7 +517,7 @@ Reads the GLB files back off disk and checks that no image is embedded, every im
 
 ```
 models 1039, image references 328 pointing at 12 distinct texture files
-manifests 2, materials 20 (8 colour only), tres 0
+manifests 2, materials 20 (8 color only), tres 0
 
 PASS: no embedded images, every uri resolves, roots identity, UVs intact
 ```
@@ -539,12 +539,12 @@ godot --headless --script res://tools/verify_import.gd -- --assets res://assets
 | `--materials-dir`  | `materials`        | Where the per-pack manifests are written                      |
 | `--res-prefix`     | `res://<dst name>` | Where the assets will live in the target Godot project        |
 | `--split-heads`     | off                | Put each character's head on its own mesh node                |
-| `--untextured MODE` | `fill`             | `fill` fills a bare material from its flavor set default, `keep` leaves it flat colour, `drop` writes no model for it, `fill-or-drop` does both |
+| `--untextured MODE` | `fill`             | `fill` fills a bare material from its flavor set default, `keep` leaves it flat color, `drop` writes no model for it, `fill-or-drop` does both |
 | `--scan-materials`  | off                | Report texture resolution only, write nothing                 |
 | `--scan-report PATH`| off                | With `--scan-materials`, dump every model's raw material records to `PATH` |
 | `--force`           | off                | Reconvert files that are already up to date                   |
 | `--verify`         | off                | Reimport each GLB and check bounds, bone and action parity    |
-| `--vertex-colors`  | `drop`             | `keep` retains colour attributes                              |
+| `--vertex-colors`  | `drop`             | `keep` retains color attributes                              |
 | `--animations`     | `keep`             | `drop` discards baked-in takes                                |
 | `--lods`           | `drop`             | `keep` ships every LOD level, which renders them all at once  |
 | `-j`, `--workers`  | half the CPU cores | Concurrent Blender processes                                  |
@@ -583,7 +583,7 @@ Its FBX declare a unit the geometry is not in. See [Fixing a pack that converts 
 **A tree or bush is white, with flat quads where its leaves should be**
 Its FBX binds no texture, so the alpha cutout that shapes each leaf card has nothing to cut with. Add it to [foliage_overrides.json](#foliage-that-names-no-texture) and reconvert with `--force`. Quads spanning the whole canopy are a separate thing, the LOD imposter, and mean the model was converted with `--lods keep`.
 
-**A building or prop is flat white or flat grey, with no texture anywhere on it**
+**A building or prop is flat white or flat gray, with no texture anywhere on it**
 Its FBX bound no texture to begin with, so there was nothing to carry across, and by default the converter already tries to fix it. Check the model's materials in `materials/<pack>/materials.json`: an entry with `albedo_color` and no `albedo_texture` still has no flavor set covering it. Where the missing atlas is a single obvious texture reference, name it in [texture_overrides.json](#fixing-unresolved-textures); where the choice is between several shipped alternatives, or the material references no file at all, add a set and a binding to [material_overrides.json](#flavor-sets-and-default-textures) instead. To leave what is still bare out of the output rather than fix it, convert with [`--untextured drop` or `fill-or-drop`](#filling-keeping-or-dropping-untextured-models).
 
 **`ASCII FBX files are not supported`**

@@ -75,9 +75,9 @@ glTF has no concept of an external material. A material definition always lives 
 
 On top of that, one `StandardMaterial3D` per atlas is generated so meshes can share a single material resource, which Godot cannot do for materials embedded in separate scenes.
 
-Materials are keyed on the resolved texture rather than the FBX material name. Synty's names are Maya leftovers and ambiguous across files: in BattleRoyale, `lambert1` alone maps to four different textures. Untextured materials key on colour and alpha instead, so `glass`, `glass1` and `glass2` collapse into a single `Glass`. That turns 64 source material names into 18 materials.
+Materials are keyed on the resolved texture rather than the FBX material name. Synty's names are Maya leftovers and ambiguous across files: in BattleRoyale, `lambert1` alone maps to four different textures. Untextured materials key on color and alpha instead, so `glass`, `glass1` and `glass2` collapse into a single `Glass`. That turns 64 source material names into 18 materials.
 
-An unresolved reference still names its material, so two different unresolved textures cannot collapse into one just because their Maya names normalise alike.
+An unresolved reference still names its material, so two different unresolved textures cannot collapse into one just because their Maya names normalize alike.
 
 ### Reading a channel, not the first image node
 
@@ -91,9 +91,9 @@ Image Texture.002  -> Normal Map.Color
 
 Channels are read by following the link into the socket instead, which is the only way to know what a map is for. Before that, 77 AridDesert materials wore their emissive mask as an albedo and dropped the atlas entirely, and it looked like an ordinary texture match in the report.
 
-The same read gets the rest of the material for free, so every property the FBX declares now survives: base colour, coverage, emission, normals, and the shading response Blender derives from `Shininess` and `ReflectionFactor`. What a channel is *for* comes from the socket; what it *points at* still goes through the same matcher, the same overrides and the same report, so an emissive map that fails to resolve is as visible as an albedo that does.
+The same read gets the rest of the material for free, so every property the FBX declares now survives: base color, coverage, emission, normals, and the shading response Blender derives from `Shininess` and `ReflectionFactor`. What a channel is *for* comes from the socket; what it *points at* still goes through the same matcher, the same overrides and the same report, so an emissive map that fails to resolve is as visible as an albedo that does.
 
-Only the map applies where a material declares both a map and a value. Maya ignores a colour once a file is connected over it, so a textured material exports with a white factor rather than multiplying the two.
+Only the map applies where a material declares both a map and a value. Maya ignores a color once a file is connected over it, so a textured material exports with a white factor rather than multiplying the two.
 
 ### Telling two materials apart
 
@@ -108,9 +108,9 @@ Lambert_A45_808080
 
 Qualifiers are derived from the material and never from collision order, which matters because names are assigned per file inside Blender while the manifest is merged across the whole pack afterwards. A suffix handed out because two materials happened to meet in one file would mean something different in the next file, and the merge would quietly join records that are not the same material.
 
-### Coverage has to ride on the base colour texture
+### Coverage has to ride on the base color texture
 
-glTF has no alpha map. Coverage lives in the base colour texture's alpha channel, so a mask has to be the file the material is coloured with. Across 10,488 source materials, 179 bind `TransparentColor` and every one of them names the file it already colours with, apart from eleven Military fences that bind only a mask, which then supplies their colour too.
+glTF has no alpha map. Coverage lives in the base color texture's alpha channel, so a mask has to be the file the material is colored with. Across 10,488 source materials, 179 bind `TransparentColor` and every one of them names the file it already colors with, apart from eleven Military fences that bind only a mask, which then supplies their color too.
 
 glTF has no cutout flag either. The exporter infers `alphaMode: MASK` from a threshold node in front of the Alpha socket, so the converter builds one. That is a real choice rather than a reading of the file, since FBX says only that a mask is bound: every Synty mask is a cutout, and cutouts sort correctly where blending does not. It also makes the GLB and the generated `.tres` agree, where before one said blend and the other said scissor.
 
@@ -126,9 +126,9 @@ Without that, a mesh with more than one material collapses onto whatever lands i
 
 Blender's `export_keep_originals` writes an image with **both** a `uri` and a `bufferView`, which glTF defines as mutually exclusive. The `bufferView` holds a 250 byte placeholder PNG, not the real atlas, so a loader that prefers it gets a stub. Godot happens to prefer the `uri`, but the file is invalid, so the converter strips the `bufferView` after export and rewrites the `uri` relative to the GLB.
 
-### Colour space
+### Color space
 
-glTF stores base colour linearly; Godot's `albedo_color` is sRGB. Godot's own glTF importer converts on the way in, turning a linear `0.0522` into `0.2533`. The manifests apply the same conversion, so a generated `.tres` matches what the GLB produces. Writing the linear value straight through renders noticeably too dark.
+glTF stores base color linearly; Godot's `albedo_color` is sRGB. Godot's own glTF importer converts on the way in, turning a linear `0.0522` into `0.2533`. The manifests apply the same conversion, so a generated `.tres` matches what the GLB produces. Writing the linear value straight through renders noticeably too dark.
 
 ## Texture resolution
 
@@ -141,7 +141,7 @@ Not one texture reference in any pack resolves directly. They point at internal 
 | `PolygonCastle_Texture_01_A.psd` | `PolygonFantasyKingdom_Texture_01_A.png` |
 | `Weapon_Skins_Master_07.tif` | `Weapons/Wep_Skin_07.png` |
 
-What survives the rename is the distinctive tail of the name, so candidates are scored on their trailing token run, backed by overall token overlap. Names are tokenised by splitting on separators and letter/digit boundaries, normalising plurals, stripping leading zeros from numbers, and dropping authoring noise like `Cleaned` and `Master`.
+What survives the rename is the distinctive tail of the name, so candidates are scored on their trailing token run, backed by overall token overlap. Names are tokenised by splitting on separators and letter/digit boundaries, normalizing plurals, stripping leading zeros from numbers, and dropping authoring noise like `Cleaned` and `Master`.
 
 Three rules keep it honest:
 

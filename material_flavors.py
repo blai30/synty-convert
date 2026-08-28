@@ -1,9 +1,9 @@
 """Interchangeable texture sets, and the materials that default into them.
 
 Synty ships several textures for a surface whose choice belongs to the consumer: five
-tileable walls, eight roofs, three recolours of one atlas. The FBX names a placeholder that
+tileable walls, eight roofs, three recolors of one atlas. The FBX names a placeholder that
 never shipped, or names nothing at all, so ``texture_matching`` has nothing to decode and
-the material arrives colour only.
+the material arrives color only.
 
 This module holds the curated answer instead: which shipped textures form a set, which
 member a bare material falls back to, and which materials each set applies to. Bindings are
@@ -49,7 +49,7 @@ def expand_sets(config, textures, source_root, warnings):
 
     A set may also declare ``cutout``, which says its default is an alpha card rather than
     an opaque surface: a Synty foliage or netting quad has no coverage of its own to cut
-    with until the same image is bound as both colour and mask. The flag is carried through
+    with until the same image is bound as both color and mask. The flag is carried through
     unchanged, defaulting to false when a set does not declare it, so a caller filling a bare
     material can tell the two cases apart.
     """

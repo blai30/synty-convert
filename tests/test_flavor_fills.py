@@ -51,7 +51,7 @@ class FlavorFillsReportsWhatFilled(unittest.TestCase):
                          ["Texture_01_A"])
 
     def test_a_material_with_no_albedo_channel_does_not_crash(self):
-        resolved = {"a": {"name": "ColourOnly", "channels": {}}}
+        resolved = {"a": {"name": "ColorOnly", "channels": {}}}
         self.assertEqual(material_flavors.flavor_fills(resolved), [])
 
     def test_two_bindings_sharing_a_material_glob_stay_separate(self):

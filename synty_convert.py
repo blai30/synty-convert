@@ -339,9 +339,9 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
 
 
 def linear_to_srgb(value):
-    """Convert a linear colour channel to the sRGB space Godot's albedo_color expects.
+    """Convert a linear color channel to the sRGB space Godot's albedo_color expects.
 
-    Blender and glTF both store base colour linearly; StandardMaterial3D.albedo_color is
+    Blender and glTF both store base color linearly; StandardMaterial3D.albedo_color is
     sRGB. Writing the linear number straight into a .tres renders noticeably too dark.
     """
     if value <= 0.0031308:
@@ -432,8 +432,8 @@ def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
             else:
                 record["albedo_color"] = [*(linear_to_srgb(c) for c in entry["color"]), entry["alpha"]]
             if emission.get("texture"):
-                # The map stands in for the emissive colour, the way Maya treats a connected
-                # file, so the colour is not written alongside it.
+                # The map stands in for the emissive color, the way Maya treats a connected
+                # file, so the color is not written alongside it.
                 record["emission_texture"] = as_res_path(emission["texture"], output_root, res_prefix)
                 record["emission_energy"] = entry["emission_strength"]
             elif any(entry["emission_color"]):
@@ -448,7 +448,7 @@ def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
                 record["transparency"] = entry["transparency"]
             for channel in ("albedo", "emission", "normal", "alpha"):
                 asked = channel_of(entry, channel)
-                # A mask naming the file the material is coloured with says nothing new.
+                # A mask naming the file the material is colored with says nothing new.
                 if not asked.get("reference") or (channel == "alpha" and asked.get("reference")
                                                   == albedo.get("reference")):
                     continue
@@ -518,7 +518,7 @@ def report_materials(totals, contexts, judge_bindings=True):
         if not materials:
             continue
         # Every channel resolves through the same matcher, so all of them are reviewable.
-        # A mask that names the same file the material is coloured with resolved with it, so
+        # A mask that names the same file the material is colored with resolved with it, so
         # listing it again would say the same thing twice.
         asked = [(entry, name, channel_of(entry, name)) for entry in materials.values()
                  for name in ("albedo", "emission", "normal", "alpha")
@@ -587,7 +587,7 @@ def report_materials(totals, contexts, judge_bindings=True):
                       f"({entry['used_by']} files)")
         for entry, channel, found in sorted(asked, key=lambda item: -item[0]["used_by"]):
             if not found.get("method"):
-                lost = "colour only" if channel == "albedo" else f"no {channel} map"
+                lost = "color only" if channel == "albedo" else f"no {channel} map"
                 print(f"     UNRESOLVED  {found['reference']}  ({entry['used_by']} files, "
                       f"{lost}; add to texture_overrides.json)")
 
@@ -725,7 +725,7 @@ def main():
                         help="what to do with a material that bound no texture. 'fill' gives "
                              "it the default from its flavor set in material_overrides.json, "
                              "which is what most bare Synty materials want; 'keep' leaves it "
-                             "as flat colour; 'drop' writes no model for it at all and "
+                             "as flat color; 'drop' writes no model for it at all and "
                              "deletes one an earlier run left behind; 'fill-or-drop' fills "
                              "what it can and drops the rest. Animation files, which carry "
                              "no mesh, are never dropped. This governs filling only: the "

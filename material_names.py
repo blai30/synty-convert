@@ -98,6 +98,6 @@ def canonical_name(record):
     if record["metallic"]:
         parts.append("M%02d" % round(record["metallic"] * 100))
     if not channels.get("albedo"):
-        # Nothing above names the colour, and colour is all an untextured material is.
+        # Nothing above names the color, and color is all an untextured material is.
         parts.append(hex_of(record["color"]))
     return re.sub(r"_+", "_", "_".join(part for part in parts if part)).strip("_")
