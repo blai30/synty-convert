@@ -43,6 +43,7 @@ MIN_PLAUSIBLE_SPAN = 0.1
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import material_flavors
+import material_names
 import texture_matching
 
 BLENDER_CANDIDATES = [
@@ -197,6 +198,8 @@ def pack_contexts(packs, source_root, output_root):
         sets = material_flavors.expand_sets(config, index(pack), str(source_root / pack),
                                             complaints)
         bindings = material_flavors.normalize_bindings(config, sets, complaints)
+        companions = material_flavors.expand_companions(config, index(pack),
+                                                        str(source_root / pack), complaints)
         warnings.extend(f"{pack}: {complaint}" for complaint in complaints)
         contexts[pack] = {
             "source_root": str(source_root / pack),
@@ -205,7 +208,7 @@ def pack_contexts(packs, source_root, output_root):
             "overrides": entries,
             "foreign": foreign,
             "foliage": {k: v for k, v in foliage.get(pack, {}).items() if not k.startswith("_")},
-            "materials": {"sets": sets, "bind": bindings},
+            "materials": {"sets": sets, "bind": bindings, "companions": companions},
         }
     return contexts, warnings
 
@@ -364,12 +367,88 @@ def channel_of(entry, name):
     return (entry.get("channels") or {}).get(name) or {}
 
 
-def flavor_variants(record, entry, sets, output_root, pack, res_prefix, warnings):
+def apply_channels(record, entry, output_root, res_prefix):
+    """Write the emission and normal keys a material's channels imply onto a manifest record.
+
+    Shared by an observed material and by the flavor siblings generated from it, so a sibling
+    whose member declares a different companion cannot keep the base's map. Every key it owns
+    is cleared first, because a sibling is built by copying its base and the base's glow must
+    not survive into a recolor the pack authored none for. That includes the four diagnostic
+    keys (`emission_reference`, `emission_match`, `normal_reference`, `normal_match`) alongside
+    the five value keys: a sibling's companion is found by member lookup rather than by
+    matching a texture name, so it never earns a `reference` of its own, and a stale one
+    copied from the base would make two siblings that render identically compare as different
+    wherever something reads these keys, such as the collision check in write_manifests.
+    """
+    for key in ("emission_texture", "emission_color", "emission_energy",
+                "emission_reference", "emission_match",
+                "normal_texture", "normal_scale",
+                "normal_reference", "normal_match"):
+        record.pop(key, None)
+    emission = channel_of(entry, "emission")
+    normal = channel_of(entry, "normal")
+    if emission.get("texture"):
+        # The map stands in for the emissive color, the way Maya treats a connected file,
+        # so the color is not written alongside it.
+        record["emission_texture"] = as_res_path(emission["texture"], output_root, res_prefix)
+        record["emission_energy"] = entry["emission_strength"]
+    elif any(entry["emission_color"]):
+        record["emission_color"] = [linear_to_srgb(c) for c in entry["emission_color"]]
+        record["emission_energy"] = entry["emission_strength"]
+    if normal.get("texture"):
+        record["normal_texture"] = as_res_path(normal["texture"], output_root, res_prefix)
+        record["normal_scale"] = entry["normal_strength"]
+    return record
+
+
+def sibling_channels(entry, member, companions, output_root, pack, warnings):
+    """The channels a sibling wearing `member` would have had.
+
+    A companion belongs to the atlas, so a sibling takes its own member's maps rather than
+    inheriting the observed material's. A member declaring none carries none, which is what
+    stops a recolor from keeping a glow the pack never authored for it. A companion that was
+    declared but not mirrored into the output is dropped and warned about, the same rule the
+    sibling albedo itself follows in flavor_variants: a manifest must never name a file that is
+    not on disk, and a silent drop is how a stale material_overrides.json entry goes unnoticed.
+
+    The alpha channel rides on the albedo's own file rather than being a companion, so when it
+    is the very same dict as the base's albedo (a cutout material, where blender_convert binds
+    one image as both color and mask) it is re-aliased to the sibling's own albedo dict here,
+    rather than left pointing at the base's.
+    """
+    channels = dict(entry.get("channels") or {})
+    original_albedo = channels.get("albedo")
+    channels["albedo"] = dict(original_albedo or {}, member=member, texture_source=member)
+    if channels.get("alpha") is original_albedo:
+        channels["alpha"] = channels["albedo"]
+    declared = companions.get(member) or {}
+    for channel in material_flavors.COMPANION_CHANNELS:
+        target = declared.get(channel)
+        if not target:
+            channels.pop(channel, None)
+            continue
+        mirrored = Path(output_root) / pack / target
+        if mirrored.exists():
+            channels[channel] = {"member": target, "texture_source": target,
+                                 "texture": str(mirrored), "reference": None,
+                                 "method": "companion", "score": None}
+        else:
+            channels.pop(channel, None)
+            warnings.append(f"{pack}: companion {channel} for {member} skipped, "
+                            f"{target} was not mirrored into the output")
+    return channels
+
+
+def flavor_variants(record, entry, sets, companions, output_root, pack, res_prefix, warnings):
     """Sibling records for the rest of the flavor set this material's texture belongs to.
 
     Generated per observed material rather than per set, so a material carrying qualifiers
     keeps them: PolygonFantasyKingdom_01_A_R75_M50 yields _01_B_R75_M50, and nothing has to
     invent surface properties for a texture no FBX ever bound.
+
+    A sibling is named by the same function that named the observed material, rather than by
+    slicing the observed name apart. That matters because a sibling's companions are its own
+    member's, so the qualifiers a companion contributes are not the base's to reuse.
     """
     member = channel_of(entry, "albedo").get("member")
     if not member or not sets:
@@ -380,7 +459,6 @@ def flavor_variants(record, entry, sets, output_root, pack, res_prefix, warnings
         # for a sibling texture. canonical_name only departs from the atlas when no albedo
         # resolved, which this member proves is not the case.
         return []
-    qualifiers = record["name"][len(base_stem):]
     siblings = []
     for other in material_flavors.variants_of(member, sets):
         target = Path(output_root) / pack / other
@@ -391,14 +469,24 @@ def flavor_variants(record, entry, sets, output_root, pack, res_prefix, warnings
             warnings.append(f"{pack}: flavor variant {Path(other).stem} skipped, "
                             f"{other} was not mirrored into the output")
             continue
+        channels = sibling_channels(entry, other, companions, output_root, pack, warnings)
+        as_observed = dict(entry, channels=channels)
         sibling = dict(record)
-        sibling["name"] = Path(other).stem + qualifiers
+        sibling["name"] = material_names.canonical_name(as_observed)
         sibling["used_by"] = 0
         sibling["variant_of"] = record["name"]
         sibling["source_names"] = []
         sibling["albedo_texture"] = as_res_path(target, output_root, res_prefix)
-        sibling.pop("reference", None)
-        sibling.pop("match", None)
+        apply_channels(sibling, as_observed, output_root, res_prefix)
+        # A sibling has no FBX reference of its own, so every diagnostic key describing
+        # how an observed material's texture resolved is dropped: the bare albedo
+        # reference/match, and any per-channel pair such as alpha_reference/alpha_match.
+        # Expressed as one rule rather than one pop per channel, so a future companion
+        # channel does not need its own special case here.
+        diagnostic_keys = [key for key in sibling if key in ("reference", "match")
+                           or key.endswith("_reference") or key.endswith("_match")]
+        for key in diagnostic_keys:
+            sibling.pop(key)
         siblings.append(sibling)
     return siblings
 
@@ -423,25 +511,14 @@ def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
         entries = []
         observed = []
         for name, entry in sorted(materials.items()):
-            albedo, emission = channel_of(entry, "albedo"), channel_of(entry, "emission")
-            normal = channel_of(entry, "normal")
+            albedo = channel_of(entry, "albedo")
             record = {"name": name, "used_by": entry["used_by"],
                       "source_names": sorted(entry["sources"])}
             if albedo.get("texture"):
                 record["albedo_texture"] = as_res_path(albedo["texture"], output_root, res_prefix)
             else:
                 record["albedo_color"] = [*(linear_to_srgb(c) for c in entry["color"]), entry["alpha"]]
-            if emission.get("texture"):
-                # The map stands in for the emissive color, the way Maya treats a connected
-                # file, so the color is not written alongside it.
-                record["emission_texture"] = as_res_path(emission["texture"], output_root, res_prefix)
-                record["emission_energy"] = entry["emission_strength"]
-            elif any(entry["emission_color"]):
-                record["emission_color"] = [linear_to_srgb(c) for c in entry["emission_color"]]
-                record["emission_energy"] = entry["emission_strength"]
-            if normal.get("texture"):
-                record["normal_texture"] = as_res_path(normal["texture"], output_root, res_prefix)
-                record["normal_scale"] = entry["normal_strength"]
+            apply_channels(record, entry, output_root, res_prefix)
             record["roughness"] = entry["roughness"]
             record["metallic"] = entry["metallic"]
             if entry.get("transparency"):
@@ -458,9 +535,10 @@ def write_manifests(totals, materials_root, output_root, res_prefix, contexts):
             entries.append(record)
             observed.append((record, entry))
         sets = ((contexts.get(pack) or {}).get("materials") or {}).get("sets") or {}
+        companions = ((contexts.get(pack) or {}).get("materials") or {}).get("companions") or {}
         by_name = {record["name"]: record for record in entries}
         for record, entry in observed:
-            for sibling in flavor_variants(record, entry, sets, output_root, pack,
+            for sibling in flavor_variants(record, entry, sets, companions, output_root, pack,
                                            res_prefix, warnings):
                 existing = by_name.get(sibling["name"])
                 if existing is None:

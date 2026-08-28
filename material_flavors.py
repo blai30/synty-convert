@@ -1,16 +1,20 @@
-"""Interchangeable texture sets, and the materials that default into them.
+"""Curated material knowledge the FBX does not carry.
 
-Synty ships several textures for a surface whose choice belongs to the consumer: five
-tileable walls, eight roofs, three recolors of one atlas. The FBX names a placeholder that
-never shipped, or names nothing at all, so ``texture_matching`` has nothing to decode and
-the material arrives color only.
+Two kinds live here. Interchangeable texture sets are the textures a pack ships as
+alternatives for one surface, five tileable walls or three recolors of one atlas, whose
+choice belongs to the consumer; the FBX names a placeholder that never shipped, or names
+nothing at all, so ``texture_matching`` has nothing to decode and the material arrives
+color only. Companion maps are the emissive and normal textures a pack ships for an atlas
+that no FBX references at all, because that wiring lived in Unity materials which are not
+part of the source packs.
 
-This module holds the curated answer instead: which shipped textures form a set, which
-member a bare material falls back to, and which materials each set applies to. Bindings are
-keyed on the FBX's own material name, because a material whose bitmap path was emptied
-before export has no texture stem to key on. Listing a set's other members is that same
-knowledge read the other way, and is what lets a converted model arrive with every
-alternative already available to swap to.
+This module holds the curated answer to both: which shipped textures form a set, which
+member a bare material falls back to, which materials each set applies to, and which
+emissive or normal map belongs with which atlas. Bindings are keyed on the FBX's own
+material name, because a material whose bitmap path was emptied before export has no texture
+stem to key on. Companions are keyed on the atlas instead, because one emissive serves every
+material wearing it. Listing a set's other members is that same knowledge read the other way,
+and is what lets a converted model arrive with every alternative already available to swap to.
 
 Paths here are pack-relative POSIX strings. They cross into the Blender worker through a
 JSON job file, where an absolute path would be meaningless: the worker joins them onto the
@@ -86,6 +90,62 @@ def expand_sets(config, textures, source_root, warnings):
                                 f"{member}")
             seen[member] = name
     return sets
+
+
+# The channels a companion may declare. Albedo is what a companion hangs off rather than
+# something it can supply, and alpha rides on the albedo's own file in glTF.
+COMPANION_CHANNELS = ("emission", "normal")
+
+
+def expand_companions(config, textures, source_root, warnings):
+    """Resolve every declared companion map against the textures a pack actually ships.
+
+    The two sides are deliberately asymmetric. A key may match many albedos, because one
+    emissive commonly serves a whole set of recolors and writing an identical entry per
+    member would only invite them to drift apart. A value must match exactly one texture,
+    because a channel binds one file and there is no defensible way to choose among several;
+    an ambiguous value is dropped rather than guessed at, the same rule expand_sets follows
+    for a default that is not among its own members.
+
+    Keys are tried in the order they are written and the first to claim an albedo on a given
+    channel keeps it, so an overlap is reported rather than silently resolved by whichever
+    pattern happens to sort first.
+    """
+    relatives = sorted(relative(path, source_root) for path in textures)
+    companions = {}
+    claimed = {}
+    for pattern, channels in (config.get("companions") or {}).items():
+        if pattern.startswith("_"):
+            continue
+        albedos = [rel for rel in relatives if matches_suffix(rel, pattern)]
+        if not albedos:
+            warnings.append(f"companion key matched nothing: {pattern}")
+            continue
+        found = {}
+        for channel, target in sorted(channels.items()):
+            if channel not in COMPANION_CHANNELS:
+                warnings.append(f"companion for '{pattern}' names unknown channel "
+                                f"'{channel}'; ignored")
+                continue
+            matched = [rel for rel in relatives if matches_suffix(rel, target)]
+            if len(matched) != 1:
+                warnings.append(f"companion {channel} '{target}' for '{pattern}' matches "
+                                f"{len(matched)} textures; ignored")
+                continue
+            found[channel] = matched[0]
+        for albedo in albedos:
+            for channel, target in found.items():
+                # A map is never its own atlas. Without this a loose key would bind an
+                # emissive to itself and name a material after it.
+                if albedo == target:
+                    continue
+                if (albedo, channel) in claimed:
+                    warnings.append(f"companion keys '{claimed[(albedo, channel)]}' and "
+                                    f"'{pattern}' overlap on {albedo} {channel}")
+                    continue
+                claimed[(albedo, channel)] = pattern
+                companions.setdefault(albedo, {})[channel] = target
+    return companions
 
 
 def normalize_bindings(config, sets, warnings):

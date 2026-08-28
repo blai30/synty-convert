@@ -482,6 +482,34 @@ def flavor_fill(context, source, material_name, warnings):
             "cutout": bool(chosen.get("cutout"))}
 
 
+def companion_fill(context, channel, member, warnings):
+    """The map declared for this atlas on this channel, or None when none is declared.
+
+    Shaped exactly like resolve_texture's return so everything downstream, the canonical name
+    above all, cannot tell the difference between a map the FBX asked for and one this
+    supplied. Keyed on what the albedo settled on rather than on what the FBX asked for, so
+    one declaration covers a material however it reached its atlas, including one the flavor
+    fill has just supplied.
+    """
+    declared = ((context.get("materials") or {}).get("companions") or {}).get(member) or {}
+    target = declared.get(channel)
+    if not target:
+        return None
+    relative = target.replace("/", os.sep)
+    output_root = context.get("output_root", "")
+    candidate = os.path.join(output_root, relative)
+    exists = os.path.exists(candidate)
+    # Mirrors flavor_fill: an output pack that does not exist yet means this is a scan, and
+    # claiming a mirrored path that is not on disk would put a phantom file into the scan
+    # report that pack authors read. Only warn once there is an output pack to have failed
+    # to mirror into.
+    if not exists and output_root and os.path.isdir(output_root):
+        warnings.append(f"companion {channel} texture not mirrored yet: {relative}")
+    return {"texture": candidate if exists else None,
+            "texture_source": os.path.join(context.get("source_root", ""), relative),
+            "reference": None, "method": "companion", "score": None, "member": target}
+
+
 def resolve_materials(context, source, warnings):
     """Map every imported material to a canonical record. Makes no changes to the scene."""
     context = context or {}
@@ -519,6 +547,16 @@ def resolve_materials(context, source, warnings):
                     # cut away. Binding the color alone ships the leaf as a solid
                     # rectangle, so the same image has to serve as the mask.
                     record["channels"]["alpha"] = filled
+        # A companion belongs to the atlas rather than to the material, so it is keyed on
+        # whatever the albedo settled on. Last again, and only into an empty channel, so a
+        # map the FBX named itself always wins over a declared one.
+        member = (record["channels"].get("albedo") or {}).get("member")
+        if member:
+            for channel in material_flavors.COMPANION_CHANNELS:
+                if not record["channels"].get(channel):
+                    filled = companion_fill(context, channel, member, warnings)
+                    if filled:
+                        record["channels"][channel] = filled
         record["transparency"] = transparency_of(record)
         record["name"] = material_names.canonical_name(record)
         resolved[material.name] = record
