@@ -18,7 +18,13 @@ def record(**overrides):
 
 
 def channel(source):
-    return {"texture_source": source, "reference": None, "member": source}
+    """A resolved map. `member` is the pack-relative path a companion target is compared to."""
+    return {"texture_source": source, "reference": source, "member": source, "method": "exact"}
+
+
+def unresolved(reference):
+    """A map the FBX named and the pack never shipped, so it settled on no file at all."""
+    return {"texture_source": None, "reference": reference, "member": None, "method": None}
 
 
 class DefaultRoughness(unittest.TestCase):
@@ -67,6 +73,10 @@ class UnsharedTail(unittest.TestCase):
         self.assertEqual(material_names.unshared_tail("Atlas_01", "Atlas_01"), "Atlas_01")
 
 
+SCIFI_COMPANIONS = {"Textures/PolygonSciFiSpace_Texture_01_A.png":
+                    {"emission": "Textures/PolygonSciFiSpace_01_Emissive.png"}}
+
+
 class CanonicalName(unittest.TestCase):
 
     def test_plain_material_is_named_for_its_atlas_alone(self):
@@ -75,19 +85,80 @@ class CanonicalName(unittest.TestCase):
                 "/packs/FK/Textures/Atlas_01_A.png")})),
             "Atlas_01_A")
 
-    def test_emissive_map_qualifies_the_name(self):
+    def test_a_map_the_atlas_does_not_declare_qualifies_the_name(self):
+        # The one thing that can tell two materials on one atlas apart. SciFiSpace ships both:
+        # this material binds _02_Emissive while the rest of Texture_01_A takes the declared
+        # _01_Emissive, so only this one is named for its map.
         self.assertEqual(
-            material_names.canonical_name(record(channels={
-                "albedo": channel("/packs/SFS/Textures/PolygonSciFiSpace_Texture_01_A.png"),
-                "emission": channel("/packs/SFS/Textures/PolygonSciFiSpace_01_Emissive.png")})),
-            "PolygonSciFiSpace_Texture_01_A_01_Emissive")
+            material_names.canonical_name(
+                record(channels={
+                    "albedo": channel("Textures/PolygonSciFiSpace_Texture_01_A.png"),
+                    "emission": channel("Textures/Alts/PolygonSciFiSpace_02_Emissive.png")}),
+                SCIFI_COMPANIONS),
+            "PolygonSciFiSpace_Texture_01_A_02_Emissive")
 
-    def test_normal_map_qualifies_the_name(self):
+    def test_the_declared_map_leaves_the_name_alone(self):
+        # Synty ships Wall_Brick_01.png beside Wall_Brick_01_Normals.png, so the base is the
+        # material and the suffix marks a channel. Declaring a companion must not rename a
+        # pack's whole material set, and must not name a material after a file that is not
+        # its albedo.
         self.assertEqual(
-            material_names.canonical_name(record(channels={
-                "albedo": channel("/packs/FK/Textures/Wall_Brick_01.png"),
-                "normal": channel("/packs/FK/Textures/Normals/Wall_Brick_01_Normals.png")})),
+            material_names.canonical_name(
+                record(channels={
+                    "albedo": channel("Textures/Castle/Wall_Brick_01.png"),
+                    "normal": channel("Textures/Normals/Wall_Brick_01_Normals.png")}),
+                {"Textures/Castle/Wall_Brick_01.png":
+                    {"normal": "Textures/Normals/Wall_Brick_01_Normals.png"}}),
+            "Wall_Brick_01")
+
+    def test_a_map_qualifies_when_its_atlas_declares_nothing_on_that_channel(self):
+        self.assertEqual(
+            material_names.canonical_name(
+                record(channels={
+                    "albedo": channel("Textures/Castle/Wall_Brick_01.png"),
+                    "normal": channel("Textures/Normals/Wall_Brick_01_Normals.png")}),
+                SCIFI_COMPANIONS),
             "Wall_Brick_01_Normals")
+
+    def test_an_unresolved_reference_still_qualifies_against_a_declared_companion(self):
+        # FantasyKingdom's four HouseRoofNormals/Woods_normals materials name a normal their
+        # pack never shipped, which leaves them without the map the rest of the atlas wears.
+        # They render differently, so they must not collapse into the plain atlas material,
+        # and a channel that settled on no file must never compare equal to a declared one.
+        self.assertEqual(
+            material_names.canonical_name(
+                record(channels={"albedo": channel("Textures/Alts/Atlas_01_A.png"),
+                                 "normal": unresolved("HouseRoofNormals.png")}),
+                {"Textures/Alts/Atlas_01_A.png": {"normal": "Textures/Normals/Atlas_01_Normals.png"}}),
+            "Atlas_01_A_HouseRoofNormals")
+
+    def test_naming_the_declared_map_yourself_still_leaves_the_name_alone(self):
+        # AridDesert has one material naming PolygonFantasyGothic_Emissive_01_A.png, which
+        # resolves to the very emissive its atlas declares. Qualifying on it would split that
+        # material off from the 100 atlas-mates it renders identically to. What decides the
+        # name is the map it settled on, never the reference that found it, which stays on
+        # the record for the report to review.
+        named = dict(channel("Textures/AridDesert_Emissive_01_A.png"),
+                     reference="PolygonFantasyGothic_Emissive_01_A.png", method="tokens")
+        self.assertEqual(
+            material_names.canonical_name(
+                record(channels={"albedo": channel("Textures/AridDesert_Texture_01.png"),
+                                 "emission": named}),
+                {"Textures/AridDesert_Texture_01.png":
+                    {"emission": "Textures/AridDesert_Emissive_01_A.png"}}),
+            "AridDesert_Texture_01")
+
+    def test_a_bound_map_suppresses_the_emissive_color_even_when_it_qualifies_nothing(self):
+        # build_material discards a declared emission color the moment a map covers it, so
+        # this material renders exactly as its atlas-mates do and has to share their name.
+        # Suppressing the declared map's qualifier must not let the dead color name it.
+        self.assertEqual(
+            material_names.canonical_name(
+                record(channels={"albedo": channel("Textures/Atlas_01_A.png"),
+                                 "emission": channel("Textures/Atlas_01_Emissive.png")},
+                       emission_color=[1.0, 0.0, 0.0]),
+                {"Textures/Atlas_01_A.png": {"emission": "Textures/Atlas_01_Emissive.png"}}),
+            "Atlas_01_A")
 
     def test_emissive_color_qualifies_when_no_map_is_bound(self):
         self.assertEqual(

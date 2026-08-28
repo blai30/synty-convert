@@ -471,8 +471,8 @@ def flavor_variants(record, entry, sets, companions, output_root, pack, res_pref
     invent surface properties for a texture no FBX ever bound.
 
     A sibling is named by the same function that named the observed material, rather than by
-    slicing the observed name apart. That matters because a sibling's companions are its own
-    member's, so the qualifiers a companion contributes are not the base's to reuse.
+    slicing the observed name apart, so the two halves of the tool cannot drift on what a
+    given set of channels is called.
     """
     member = channel_of(entry, "albedo").get("member")
     if not member or not sets:
@@ -496,7 +496,7 @@ def flavor_variants(record, entry, sets, companions, output_root, pack, res_pref
         channels = sibling_channels(entry, other, companions, output_root, pack, warnings)
         as_observed = dict(entry, channels=channels)
         sibling = dict(record)
-        sibling["name"] = material_names.canonical_name(as_observed)
+        sibling["name"] = material_names.canonical_name(as_observed, companions)
         sibling["used_by"] = 0
         sibling["variant_of"] = record["name"]
         sibling["source_names"] = []

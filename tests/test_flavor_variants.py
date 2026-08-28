@@ -347,14 +347,13 @@ class SiblingCompanions(unittest.TestCase):
                                              self.output_root, PACK, RES_PREFIX, warnings)
 
     def test_sibling_takes_its_own_members_emissive_not_the_bases(self):
-        # The failure this exists to stop: a _01_B recolor keeping _01_A's glow, which is
-        # both the wrong texture and a name that lies about which one it is.
+        # The failure this exists to stop: a _01_B recolor keeping _01_A's glow.
         self.mirror("Textures/Atlas_01_B.png")
         self.mirror("Textures/Emissive_01_A.png")
         self.mirror("Textures/Emissive_01_B.png")
         entry = entry_for("Textures/Atlas_01_A.png")
         entry["channels"]["emission"] = {
-            "member": "Textures/Emissive_01_A.png",
+            "member": "Textures/Emissive_01_A.png", "method": "companion",
             "texture_source": "Textures/Emissive_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Emissive_01_A.png")}
         record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
@@ -366,8 +365,9 @@ class SiblingCompanions(unittest.TestCase):
         self.assertEqual(len(siblings), 1)
         self.assertTrue(siblings[0]["emission_texture"].endswith("Emissive_01_B.png"),
                         siblings[0]["emission_texture"])
-        self.assertIn("Emissive_01_B", siblings[0]["name"])
-        self.assertNotIn("Emissive_01_A", siblings[0]["name"])
+        # Same name as the sibling that declares no companion at all: a companion is a
+        # property of the atlas, so swapping one never renames the material wearing it.
+        self.assertEqual(siblings[0]["name"], "Atlas_01_B_R75_M50")
 
     def test_sibling_whose_member_declares_no_companion_carries_none(self):
         # Inheriting here would put a glow on a recolor the pack never authored one for.
@@ -375,7 +375,7 @@ class SiblingCompanions(unittest.TestCase):
         self.mirror("Textures/Emissive_01_A.png")
         entry = entry_for("Textures/Atlas_01_A.png")
         entry["channels"]["emission"] = {
-            "member": "Textures/Emissive_01_A.png",
+            "member": "Textures/Emissive_01_A.png", "method": "companion",
             "texture_source": "Textures/Emissive_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Emissive_01_A.png")}
         record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
@@ -398,7 +398,7 @@ class SiblingCompanions(unittest.TestCase):
         self.mirror("Textures/Normal_01_B.png")
         entry = entry_for("Textures/Atlas_01_A.png", normal_strength=2.0)
         entry["channels"]["normal"] = {
-            "member": "Textures/Normal_01_A.png",
+            "member": "Textures/Normal_01_A.png", "method": "companion",
             "texture_source": "Textures/Normal_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Normal_01_A.png")}
         record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
@@ -411,8 +411,7 @@ class SiblingCompanions(unittest.TestCase):
         self.assertTrue(siblings[0]["normal_texture"].endswith("Normal_01_B.png"),
                         siblings[0]["normal_texture"])
         self.assertEqual(siblings[0]["normal_scale"], 2.0)
-        self.assertIn("Normal_01_B", siblings[0]["name"])
-        self.assertNotIn("Normal_01_A", siblings[0]["name"])
+        self.assertEqual(siblings[0]["name"], "Atlas_01_B_R75_M50")
 
     def test_sibling_whose_member_declares_no_normal_companion_carries_neither(self):
         # Inheriting here would put a bump map on a recolor the pack never authored one for.
@@ -420,7 +419,7 @@ class SiblingCompanions(unittest.TestCase):
         self.mirror("Textures/Normal_01_A.png")
         entry = entry_for("Textures/Atlas_01_A.png")
         entry["channels"]["normal"] = {
-            "member": "Textures/Normal_01_A.png",
+            "member": "Textures/Normal_01_A.png", "method": "companion",
             "texture_source": "Textures/Normal_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Normal_01_A.png")}
         record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
@@ -476,7 +475,7 @@ class SiblingCompanions(unittest.TestCase):
         self.mirror("Textures/Emissive_01_A.png")
         entry = entry_for("Textures/Atlas_01_A.png")
         entry["channels"]["emission"] = {
-            "member": "Textures/Emissive_01_A.png",
+            "member": "Textures/Emissive_01_A.png", "method": "companion",
             "texture_source": "Textures/Emissive_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Emissive_01_A.png")}
         record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,

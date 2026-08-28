@@ -485,11 +485,12 @@ def flavor_fill(context, source, material_name, warnings):
 def companion_fill(context, channel, member, warnings):
     """The map declared for this atlas on this channel, or None when none is declared.
 
-    Shaped exactly like resolve_texture's return so everything downstream, the canonical name
-    above all, cannot tell the difference between a map the FBX asked for and one this
-    supplied. Keyed on what the albedo settled on rather than on what the FBX asked for, so
-    one declaration covers a material however it reached its atlas, including one the flavor
-    fill has just supplied.
+    Shaped exactly like resolve_texture's return, so nothing downstream has to care which of
+    the two supplied a map. `member` carries the declared target, which is what lets
+    canonical_name recognize this map as the atlas's own and decline to name a material after
+    it. Keyed on what the albedo settled on rather than on what the FBX asked for, so one
+    declaration covers a material however it reached its atlas, including one the flavor fill
+    has just supplied.
     """
     declared = ((context.get("materials") or {}).get("companions") or {}).get(member) or {}
     target = declared.get(channel)
@@ -513,6 +514,7 @@ def companion_fill(context, channel, member, warnings):
 def resolve_materials(context, source, warnings):
     """Map every imported material to a canonical record. Makes no changes to the scene."""
     context = context or {}
+    companions = (context.get("materials") or {}).get("companions") or {}
     resolved = {}
     for material in bpy.data.materials:
         info = describe_material(material)
@@ -558,7 +560,7 @@ def resolve_materials(context, source, warnings):
                     if filled:
                         record["channels"][channel] = filled
         record["transparency"] = transparency_of(record)
-        record["name"] = material_names.canonical_name(record)
+        record["name"] = material_names.canonical_name(record, companions)
         resolved[material.name] = record
     return resolved
 

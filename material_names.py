@@ -1,9 +1,10 @@
 """How a converted material is named.
 
 Materials are named for their atlas, since Synty's own names are Maya leftovers that are
-ambiguous across files: lambert1 alone maps to four textures. Every property that would make
-two materials render differently then adds a qualifier, so one name means one thing across a
-whole pack.
+ambiguous across files: lambert1 alone maps to four textures. Every property that could make
+two materials on one atlas render differently then adds a qualifier, so one name means one
+thing across a whole pack. A companion map is not such a property: it is declared per atlas,
+so the base name already implies it and naming it would say nothing new.
 
 The rule lives here rather than in the Blender worker because both halves of the tool emit
 material names. The worker names what it observed in an FBX, and ``flavor_variants`` in the
@@ -52,6 +53,27 @@ def unshared_tail(stem, base):
     return "_".join(stem_tokens[shared:] or stem_tokens)
 
 
+def map_qualifier(channel, base, declared):
+    """What a bound map adds to a name, which is nothing when the atlas already implied it.
+
+    Synty's own textures already factor this out: Wall_Brick_01.png ships beside
+    Wall_Brick_01_Normals.png, so the base is the material and the suffix marks a channel.
+    A companion is keyed per atlas, so every material wearing that atlas wears the same map,
+    and repeating it would both restate the base name and rename a pack's whole material set
+    the day a binding is declared for it.
+
+    Asked against the declared target rather than against a mark left on the channel, so a
+    material that named the very file its atlas declares answers the same as one the table
+    filled: what decides a name is whether the map could differ between two materials on one
+    atlas, never who asked for it. An unresolved reference has no member and so always
+    qualifies, which is correct, since it is the one case that leaves a material without the
+    map the rest of its atlas is wearing.
+    """
+    if declared and channel.get("member") == declared:
+        return None
+    return unshared_tail(stem_of(channel), base)
+
+
 def hex_of(color):
     return "".join("%02X" % min(255, max(0, round(channel * 255))) for channel in color)
 
@@ -69,26 +91,30 @@ def base_name(record):
     return cleaned[:1].upper() + cleaned[1:]
 
 
-def canonical_name(record):
+def canonical_name(record, companions=None):
     """A stable, meaningful name shared by every mesh whose material is identical.
 
     Materials are named for their atlas, since Synty's own names are Maya leftovers that are
-    ambiguous across files: lambert1 alone maps to four textures. Every property that would
-    make two materials render differently then adds a qualifier, so a material that also
-    carries an emissive map cannot collapse into the plain one wearing the same atlas and
-    quietly lose it. Qualifiers come from the material itself and never from the order files
-    happen to be converted in, so one name means one thing across a whole pack.
+    ambiguous across files: lambert1 alone maps to four textures. Every property that could
+    make two materials on one atlas render differently then adds a qualifier, so a material
+    that binds its own emissive map cannot collapse into the plain one wearing the same atlas
+    and quietly lose it. Qualifiers come from the material itself and never from the order
+    files happen to be converted in, so one name means one thing across a whole pack.
     """
     channels = record["channels"]
     base = base_name(record)
+    # What this material's atlas declares, which is what its maps are measured against.
+    declared = (companions or {}).get((channels.get("albedo") or {}).get("member")) or {}
     parts = [base]
 
     if channels.get("emission"):
-        parts.append(unshared_tail(stem_of(channels["emission"]), base))
+        parts.append(map_qualifier(channels["emission"], base, declared.get("emission")))
     elif any(record["emission_color"]):
+        # Only where no map is bound: build_material discards a declared emission color the
+        # moment a map covers it, so naming one there would name something nothing renders.
         parts.append("Emissive" + hex_of(record["emission_color"]))
     if channels.get("normal"):
-        parts.append(unshared_tail(stem_of(channels["normal"]), base))
+        parts.append(map_qualifier(channels["normal"], base, declared.get("normal")))
     if channels.get("alpha"):
         parts.append("Cutout")
     elif record["alpha"] < 0.999:

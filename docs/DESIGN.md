@@ -97,14 +97,21 @@ Only the map applies where a material declares both a map and a value. Maya igno
 
 ### Telling two materials apart
 
-Once a material is more than an atlas, keying on the atlas alone is not enough: a material carrying an emissive map and a plain one wearing the same atlas would collapse, and one of them would silently lose a channel. SciFiSpace makes this concrete, with two materials that share `PolygonSciFiSpace_Texture_01_A` and differ only in which emissive map they add.
+Once a material is more than an atlas, keying on the atlas alone is not enough: a material binding its own emissive map and a plain one wearing the same atlas would collapse, and one of them would silently lose a channel. SciFiSpace makes this concrete, with two materials that share `PolygonSciFiSpace_Texture_01_A` and differ only in which emissive map they add.
 
-So the name carries every property that would make two materials render differently, as a qualifier on the atlas name:
+So the name carries every property that could make two materials on one atlas render differently, as a qualifier on the atlas name:
 
 ```
-PolygonNatureBiomesS2_AridDesert_Texture_01_Emissive_01_A_Cutout
+PolygonNatureBiomesS2_AridDesert_Texture_01_Cutout
+PolygonSciFiSpace_Texture_01_A_02_Emissive
 Lambert_A45_808080
 ```
+
+A map the atlas itself declares is the one thing excluded, because it is not such a property: companions are keyed per atlas, so every material wearing that atlas wears the same map, and naming it only repeats the base name. The packs say the same thing in their own filenames. FantasyKingdom ships `Textures/Castle/Wall_Brick_01.png` beside `Textures/Normals/Wall_Brick_01_Normals.png`, all five walls pairing exactly; Military ships thirteen base names with both a `_D` and an `_N`; Dungeons Realms ships one `Dungeons_2_Texture_Normal_Map.png` for the entire pack. The convention is `<base>_<channel marker>`, where the base is the material and the suffix marks a channel, so Synty has already factored the material name out. Qualifying on a companion inverts that: it named 1032 Dungeons Realms materials after a file the whole pack shares, and named FantasyKingdom's walls `Wall_Brick_01_Normals`, a string identical to a texture that is not that material's albedo. 347 of the 350 maps in the output carried a suffix that discriminated nothing.
+
+What decides the name is the map a channel settled on and never the reference that found it, so `map_qualifier` compares the channel's `member` against the target declared for that atlas. Both sides are pack-relative paths, from `resolve_texture` and from `expand_companions` respectively, so a material naming the very file its atlas declares answers the same as one the table filled, while its reference and match stay on the record for the report to review. Asking the table directly rather than marking the channel when it is built keeps this a pure function of the record and the bindings, with no flag that a future channel-producing site could forget to set. A channel that resolved to nothing has no `member` and so always qualifies, which is correct: FantasyKingdom's four `HouseRoofNormals` and `Woods_normals` materials name a normal the pack never shipped and therefore go without the map the rest of their atlas wears.
+
+An emission color never qualifies alongside a map, declared or not, because `build_material` discards a declared color the moment a map covers it. Naming one would split a material off from atlas-mates it renders identically to.
 
 Qualifiers are derived from the material and never from collision order, which matters because names are assigned per file inside Blender while the manifest is merged across the whole pack afterwards. A suffix handed out because two materials happened to meet in one file would mean something different in the next file, and the merge would quietly join records that are not the same material.
 

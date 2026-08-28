@@ -1,1 +1,1 @@
-python synty_convert.py --untextured fill-or-drop --verify -j 16 --split-heads
+python synty_convert.py --untextured fill-or-drop --verify -j 16 --split-heads --force
