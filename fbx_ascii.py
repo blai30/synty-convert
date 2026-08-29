@@ -64,6 +64,16 @@ NO_VALUE_TYPES = frozenset({"Compound", "object"})
 # itself, so the letter is carried through as a byte rather than translated into a bool.
 CHAR_LETTERS = frozenset({"Y", "T", "N", "F"})
 
+# The top level nodes a binary FBX carries and the ASCII form omits. encode_bin's
+# _write_timedate_hack overwrites the first two with its own constants and asserts these exact
+# types on the way, printing "Missing fields!" when they are absent. Synthesizing them means
+# the output is a conventional binary FBX rather than one missing a header every other FBX has.
+HEADER_NODES = (
+    ("FileId", b"", "R"),
+    ("CreationTime", "1970-01-01 10:00:00:000", "S"),
+    ("Creator", "synty_convert, transcoded from ASCII FBX", "S"),
+)
+
 # Array values wrap across lines at about 2048 characters, 5535 times over the ASCII models
 # Synty shipped, so each array is folded onto its opening line before anything else reads the
 # text. An array body holds numbers, commas and whitespace only, so matching to the next brace
@@ -112,6 +122,35 @@ def parse(text: str) -> tuple[list[Element], int]:
         raise ParseError("a block was never closed")
     _postprocess(elements, None)
     return elements, _version(elements)
+
+
+def geometry_counts(elements: list[Element]) -> dict[str, int]:
+    """What the text declares its meshes hold, for checking an import against.
+
+    A transcode that mistyped an array reaches Blender as geometry rather than as an error,
+    so the counts the source states are the only independent account of what should arrive.
+    """
+    counts = {"vertices": 0, "loops": 0, "uv_layers": 0}
+    for objects in (element for element in elements if element.id == "Objects"):
+        for geometry in (element for element in objects.elems if element.id == "Geometry"):
+            for child in geometry.elems:
+                if child.id == "Vertices":
+                    counts["vertices"] += len(child.props[0]) // 3
+                elif child.id == "PolygonVertexIndex":
+                    counts["loops"] += len(child.props[0])
+                elif child.id == "LayerElementUV":
+                    counts["uv_layers"] += 1
+    return counts
+
+
+def ensure_header(elements: list[Element]) -> list[Element]:
+    """Add the top level header nodes the ASCII form omits, in the order binary writes them."""
+    present = {element.id for element in elements}
+    index = 1 if elements and elements[0].id == "FBXHeaderExtension" else 0
+    for name, value, character in reversed(HEADER_NODES):
+        if name not in present:
+            elements.insert(index, Element(name, [value], character, []))
+    return elements
 
 
 def _lines(text):

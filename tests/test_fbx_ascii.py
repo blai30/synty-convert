@@ -341,5 +341,48 @@ class TestMalformedInput(unittest.TestCase):
         self.assertEqual(version, 0)
 
 
+class TestGeometryCounts(unittest.TestCase):
+    """What the text says the importer should build, for checking against what it built."""
+
+    def test_counts_come_from_the_declared_arrays(self):
+        elements, _ = fbx_ascii.parse(SAMPLE)
+        self.assertEqual(fbx_ascii.geometry_counts(elements),
+                         {"vertices": 2, "loops": 3, "uv_layers": 1})
+
+    def test_several_meshes_are_summed(self):
+        elements, _ = fbx_ascii.parse(SAMPLE + SAMPLE)
+        self.assertEqual(fbx_ascii.geometry_counts(elements),
+                         {"vertices": 4, "loops": 6, "uv_layers": 2})
+
+    def test_a_file_with_no_geometry_counts_nothing(self):
+        elements, _ = fbx_ascii.parse("Objects:  {\n}\n")
+        self.assertEqual(fbx_ascii.geometry_counts(elements),
+                         {"vertices": 0, "loops": 0, "uv_layers": 0})
+
+
+class TestHeader(unittest.TestCase):
+    def test_the_missing_header_nodes_are_added_after_the_extension(self):
+        elements, _ = fbx_ascii.parse(SAMPLE)
+        fbx_ascii.ensure_header(elements)
+        self.assertEqual([element.id for element in elements],
+                         ["FBXHeaderExtension", "FileId", "CreationTime", "Creator",
+                          "Objects", "Connections"])
+
+    def test_the_types_are_what_encode_bin_asserts(self):
+        elements, _ = fbx_ascii.parse(SAMPLE)
+        fbx_ascii.ensure_header(elements)
+        self.assertEqual(find(elements, "FileId").props_type, "R")
+        self.assertIsInstance(find(elements, "FileId").props[0], bytes)
+        self.assertEqual(find(elements, "CreationTime").props_type, "S")
+        self.assertIsInstance(find(elements, "CreationTime").props[0], str)
+        self.assertEqual(find(elements, "Creator").props_type, "S")
+
+    def test_a_node_that_is_already_there_is_left_alone(self):
+        elements, _ = fbx_ascii.parse(SAMPLE + 'Creator: "FBX SDK/FBX Plugins"\n')
+        fbx_ascii.ensure_header(elements)
+        self.assertEqual([element.id for element in elements].count("Creator"), 1)
+        self.assertEqual(find(elements, "Creator").props[0], "FBX SDK/FBX Plugins")
+
+
 if __name__ == "__main__":
     unittest.main()
