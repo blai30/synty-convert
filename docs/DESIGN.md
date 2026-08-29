@@ -8,6 +8,7 @@ Why the converter works the way it does. For how to use it, see the [README](../
 synty_convert.py      CLI: discovery, worker pool, reporting, manifests
 blender_convert.py    runs inside Blender: import, rebuild materials, normalize, export
 texture_matching.py   resolves FBX texture references to shipped files
+fbx_ascii.py          reads ASCII FBX, which Blender's importer cannot
 audit.py              reads the output back off disk and checks it
 tools/                scripts that run inside the user's Godot project
 ```
@@ -185,6 +186,23 @@ Scanned across all 11 packs, 6374 files. The dominant atlas resolves in every pa
 **Only the finest LOD level ships.** Synty's Nature Biomes foliage carries its LOD chain as sibling meshes named `_LOD0` through `_LOD3`. Nothing downstream reads that as a chain: Godot has no LOD group, takes no meaning from node names, and does not implement `MSFT_lod`, so every level arrives as an ordinary `MeshInstance3D` and all of them render at once, the coarsest being a billboard imposter crossing the tree it stands in for. The other mechanism, `visibility_range_begin`, is a node property with no glTF representation, so there is nothing to encode either way. Godot's importer generates its own chain from whatever it is handed, which leaves the finest level as the only one worth keeping. The drop happens before the world bounds are sampled, so the invariant across take dropping and normalization still compares the geometry that actually ships, and `--verify` counts meshes against the same scene it exported. `--lods keep` restores the whole chain, for wiring the visibility ranges up by hand.
 
 **Exporter options are filtered against the running Blender build**, so an option disappearing in a future version degrades gracefully instead of raising.
+
+## ASCII FBX
+
+Twenty-one models ship in the ASCII serialization of FBX, which Blender's importer refuses: 18 in Horror Carnival, 2 in City, 1 in SciFiSpace, and not one of them has a binary counterpart anywhere in its pack. ASCII and binary FBX are the same tree of named nodes carrying the same typed properties, so `fbx_ascii.py` reads the text into that tree and Blender's own `encode_bin`, the writer its exporter uses, writes it back out as binary. Nothing about the model is touched, and every stage downstream treats a repaired model like any other. The versions involved, 7.7, 7.4 and 7.2, are all versions the same packs already ship in binary and convert fine.
+
+What ASCII drops is the type tag on every property, so the parser assigns them, and that assignment is the whole risk of the feature.
+
+**An array's element type comes from its key.** `Vertices: *147` does not say those are float64, and inferring from the values cannot work, because a float array of whole numbers is written exactly like an integer one. Reading `Vertices` as int32 produces geometry that is garbage rather than an error. So the type comes from a table of the sixteen array keys these files use, and a key that is not in the table fails the file. That is the same refusal to guess the texture matcher makes, for the same reason.
+
+**Scalars are read from the syntax, except where position decides.** A quoted token is a string, a decimal point or exponent means float64, and anything else is an integer. Two kinds of slot override that, and both tables were measured off real binary FBX rather than reasoned about:
+
+- **Object ids are always int64.** Typing them by magnitude looks harmless, since Blender holds the value as an ordinary Python int either way, but the importer gates on the type characters: `elem_uuid` asserts `INT64`, `import_fbx.py:3254` asserts an object node is `LSS`, and three sites read `if fbx_link.props_type[1:3] == b'LL':` and skip the connection silently otherwise. A model's root connection names scene root id `0`, which fits int32, so magnitude typing drops that connection, `build_hierarchy` never reaches the model, and the file imports as an empty scene with no error raised at all.
+- **A few slots hold a double written without a decimal point**, such as `Texture/ModelUVScaling`. Nothing downstream reads them, so this one is fidelity rather than a fix, but it falls out of the same measurement.
+
+**Names are stored in the opposite order.** Binary writes `name`, `\x00\x01`, `class`; ASCII writes `class`, `::`, `name`. Blender's own `json2fbx.py` converts these with a blanket textual replace, which keeps the ASCII order and so names every object after its class, silently breaking every lookup that resolves by name. The four property slots that carry the pair were read off a real binary file rather than taken from a format description.
+
+Because all of those failures are quiet, a repair is checked rather than trusted. Immediately after the import, before any mesh is dropped, the vertex, loop and UV layer counts Blender built are compared against the counts the source text declared, and a mismatch fails the model. The general lesson is the one the id typing taught: knowing how a value is *used* is not the same as knowing what the reader *requires*, and "this divergence is invisible" is a claim that needs evidence rather than an argument.
 
 ## Size expectations
 
