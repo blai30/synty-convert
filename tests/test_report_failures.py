@@ -68,8 +68,8 @@ class FailuresNameTheirPackAndReason(unittest.TestCase):
 class FailuresGroupUnderOneReason(unittest.TestCase):
     """One fault hitting twenty models must not push a different fault out of the report.
 
-    The listing is capped, so a flat list of twenty ASCII failures would hide a lone
-    unrelated crash entirely. Grouping by reason keeps the rare one on screen, and matches
+    The listing is capped, so a flat list of twenty failures sharing one reason would hide a
+    lone unrelated crash entirely. Grouping by reason keeps the rare one on screen, and matches
     how audit.py already presents its failures.
     """
 
@@ -116,6 +116,23 @@ class FailureReasonDropsTheModelsOwnPath(unittest.TestCase):
     def test_a_message_that_was_only_a_path_does_not_become_empty(self):
         src, _, _ = failure("PackA", "SM_Prop_Barrel_01.fbx")
         self.assertEqual(synty_convert.failure_reason(src, [src]), "unknown error")
+
+
+class RepairsAreReported(unittest.TestCase):
+    """A repair changes what was imported, so a silent one is a repair nobody audits."""
+
+    def report(self, totals):
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            synty_convert.report(totals, 1.0)
+        return stdout.getvalue()
+
+    def test_repairs_are_counted_on_their_own_line(self):
+        self.assertIn("Repaired  21 ASCII FBX",
+                      self.report(synty_convert.Totals(converted=21, repaired=21)))
+
+    def test_a_run_with_no_repairs_says_nothing(self):
+        self.assertNotIn("Repaired", self.report(synty_convert.Totals(converted=21)))
 
 
 if __name__ == "__main__":

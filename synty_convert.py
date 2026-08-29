@@ -73,6 +73,11 @@ class Totals:
     src_bytes: int = 0
     dst_bytes: int = 0
     copied_bytes: int = 0
+    # Models that arrived in the ASCII serialization and were transcoded to binary before
+    # import. Counted rather than warned about: it is not a fault, it is what the converter
+    # does with a file Synty shipped in the wrong format, and the count is how you notice
+    # that a pack has more of them than it used to.
+    repaired: int = 0
     grew: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     failures: list = field(default_factory=list)
@@ -283,6 +288,10 @@ def convert_all(blender, jobs, options, contexts, workers, totals, quiet):
                                         result.get("error", "").strip().splitlines()[-1:]))
                 print(f"  [{done}/{total}] FAILED {Path(result.get('src', '?')).name}")
                 return
+            # Ahead of both early returns below, since a repaired model can equally be one
+            # that a scan only looked at or one that gets dropped as untextured.
+            if result.get("repaired"):
+                totals.repaired += 1
             if options.get("scan_report"):
                 # Bounds travel with the record because authoring a scale override needs a
                 # per-model size and nothing else reports one: report_scale only prints a
@@ -857,6 +866,8 @@ def report(totals, elapsed):
     if totals.foliage:
         print(f"Foliage   bound {sum(totals.foliage.values())} mesh(es) across "
               f"{len(totals.foliage)} model(s) whose FBX named no texture")
+    if totals.repaired:
+        print(f"Repaired  {totals.repaired} ASCII FBX transcoded to binary before import")
     if totals.untextured:
         print(f"Untextured {len(totals.untextured)} model(s) not written, no material bound a texture")
         for pack, count in sorted(collections.Counter(totals.untextured.values()).items()):
