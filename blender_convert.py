@@ -22,6 +22,7 @@ import os
 import re
 import struct
 import sys
+import tempfile
 import time
 import traceback
 import urllib.parse
@@ -32,6 +33,7 @@ import numpy
 from mathutils import Matrix
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fbx_ascii
 import material_flavors
 import material_names
 import split_character_head
@@ -999,6 +1001,78 @@ def bounds_drift(before, after):
     return max(abs(a - b) for a, b in zip(before, after))
 
 
+# Every FBX property type character, and the encode_bin call that writes one. The parser
+# assigns these; this is the only place that knows how each reaches the file.
+FBX_WRITERS = {
+    "I": "add_int32", "L": "add_int64", "Y": "add_int16", "D": "add_float64",
+    "F": "add_float32", "S": "add_string_unicode", "R": "add_bytes", "C": "add_char",
+    "i": "add_int32_array", "l": "add_int64_array", "d": "add_float64_array",
+    "f": "add_float32_array",
+}
+
+
+def build_fbx_elements(elements, parent):
+    """Turn parsed ASCII nodes into the encode_bin elements the binary writer takes."""
+    from io_scene_fbx import encode_bin
+
+    for element in elements:
+        built = encode_bin.FBXElem(element.id.encode("utf-8"))
+        parent.elems.append(built)
+        for value, character in zip(element.props, element.props_type):
+            getattr(built, FBX_WRITERS[character])(value)
+        build_fbx_elements(element.elems, built)
+    return parent
+
+
+def write_binary_fbx(text, path):
+    """Write the binary FBX equivalent of ASCII FBX text, and say what it should contain."""
+    from io_scene_fbx import encode_bin
+
+    elements, version = fbx_ascii.parse(text)
+    expected = fbx_ascii.geometry_counts(elements)
+    root = build_fbx_elements(fbx_ascii.ensure_header(elements),
+                              encode_bin.FBXElem(b""))
+    encode_bin.write(path, root, version)
+    return expected
+
+
+def import_model(src, import_options):
+    """Import an FBX, transcoding it from ASCII to binary first when that is what it is.
+
+    Blender's importer reads binary only. The two serializations hold the same tree, so a
+    file in the wrong one is repaired rather than failed: see fbx_ascii.py and docs/DESIGN.md.
+    The check afterwards is what makes the repair trustworthy, since a mistyped array reaches
+    Blender as geometry rather than as an error.
+    """
+    with open(src, "rb") as stream:
+        if fbx_ascii.is_binary(stream.read(len(fbx_ascii.BINARY_MAGIC))):
+            bpy.ops.import_scene.fbx(filepath=src, **import_options)
+            return False
+
+    with open(src, encoding="utf-8") as stream:
+        text = stream.read()
+    handle, repaired = tempfile.mkstemp(suffix=".fbx", prefix="synty_ascii_")
+    os.close(handle)
+    try:
+        expected = write_binary_fbx(text, repaired)
+        bpy.ops.import_scene.fbx(filepath=repaired, **import_options)
+    finally:
+        os.unlink(repaired)
+
+    # Counted before anything drops a mesh, and summed over the scene rather than matched per
+    # mesh, which needs no name correspondence. No import option splits or merges vertices, so
+    # these are equalities rather than bounds.
+    actual = {
+        "vertices": sum(len(mesh.vertices) for mesh in bpy.data.meshes),
+        "loops": sum(len(mesh.loops) for mesh in bpy.data.meshes),
+        "uv_layers": sum(len(mesh.uv_layers) for mesh in bpy.data.meshes),
+    }
+    if actual != expected:
+        raise RuntimeError(f"ASCII repair mismatch: the file declares {expected} "
+                           f"and Blender built {actual}")
+    return True
+
+
 def convert(job, options, packs):
     src = job["src"]
     dst = job["dst"]
@@ -1011,7 +1085,7 @@ def convert(job, options, packs):
     # Multiplies the unit conversion the FBX asks for, which is 1.0 unless the pack
     # declares a unit its geometry is not actually in. See scale_overrides.json.
     import_options["global_scale"] = job.get("scale", 1.0)
-    bpy.ops.import_scene.fbx(filepath=src, **import_options)
+    repaired = import_model(src, import_options)
 
     mode = options.get("untextured", "fill")
     context = packs.get(job.get("pack"), {})
@@ -1036,7 +1110,7 @@ def convert(job, options, packs):
         return {"src": src, "dst": dst, "pack": job.get("pack"), "src_bytes": os.path.getsize(src),
                 "dst_bytes": 0, "materials": distinct_materials(resolved),
                 "fills": material_flavors.flavor_fills(resolved), "warnings": warnings,
-                "summary": scene_summary(), "normalized_scale": None}
+                "summary": scene_summary(), "normalized_scale": None, "repaired": repaired}
 
     if options.get("vertex_colors") != "keep":
         drop_vertex_colors()
@@ -1062,7 +1136,7 @@ def convert(job, options, packs):
             os.remove(dst)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "untextured": True,
                 "src_bytes": os.path.getsize(src), "dst_bytes": 0, "materials": [],
-                "fills": [], "warnings": warnings}
+                "fills": [], "warnings": warnings, "repaired": repaired}
 
     # Neither dropping takes nor normalizing may move anything, so the world bounds are an
     # always-on invariant across both.
@@ -1105,6 +1179,7 @@ def convert(job, options, packs):
         "split": split,
         "dropped_lods": dropped_lods,
         "foliage": foliage,
+        "repaired": repaired,
         "warnings": warnings,
     }
 
