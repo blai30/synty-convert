@@ -10,7 +10,9 @@ import fbx_ascii
 # The Vertices array holds whole numbers written without a decimal point, which is the
 # case that makes inferring an array's type from its values wrong. The DocumentUrl holds
 # a semicolon, which is the comment character everywhere outside a string. The Model's id
-# is too large for int32 and the Geometry's is not, which is what selects L against I.
+# is too large for int32 and the Geometry's is not, which is why both must still read as an
+# id slot rather than by magnitude. The Model's Shading is the FBX SDK's bare-letter char
+# property, seen outside Properties70 in every real ASCII file Synty shipped.
 SAMPLE = """; FBX 7.4.0 project file
 ; ----------------------------------------------------
 
@@ -36,6 +38,7 @@ Objects:  {
 \t\t}
 \t}
 \tModel: 1852219572480, "Model::Light_Shaft_Base", "LimbNode" {
+\t\tShading: T
 \t\tProperties70:  {
 \t\t\tP: "UnitScaleFactor", "double", "Number", "",1
 \t\t\tP: "filmboxTypeID", "Short", "", "A+UH",5,5,5
@@ -105,10 +108,14 @@ class TestScalarTyping(unittest.TestCase):
     def setUp(self):
         self.elements, _ = fbx_ascii.parse(SAMPLE)
 
-    def test_an_id_that_fits_int32_is_int32(self):
+    def test_an_id_that_fits_int32_is_still_int64(self):
+        """An id slot is always int64 regardless of magnitude: Blender's importer gates the
+        object node and connection checks on the type character, not the value, so a small
+        id typed by magnitude alone would read as a connection or object node the importer
+        silently drops."""
         geometry = find(self.elements, "Geometry")
         self.assertEqual(geometry.props[0], 140718)
-        self.assertEqual(geometry.props_type[0], "I")
+        self.assertEqual(geometry.props_type[0], "L")
 
     def test_an_id_too_large_for_int32_is_int64(self):
         model = find(self.elements, "Model")
@@ -118,7 +125,22 @@ class TestScalarTyping(unittest.TestCase):
     def test_a_connection_row_types_each_value_on_its_own(self):
         connection = find(self.elements, "C")
         self.assertEqual(connection.props, ["OO", 1852219572480, 0])
-        self.assertEqual(connection.props_type, "SLI")
+        self.assertEqual(connection.props_type, "SLL")
+
+    def test_an_integer_outside_an_id_slot_still_types_by_magnitude(self):
+        """The id slot table only overrides the slots it lists; everything else still types
+        by magnitude, so the fallback is not lost."""
+        layer = find(self.elements, "LayerElementUV")
+        self.assertEqual(layer.props, [0])
+        self.assertEqual(layer.props_type, "I")
+
+    def test_a_large_integer_outside_an_id_slot_still_types_by_magnitude(self):
+        elements, _ = fbx_ascii.parse(
+            "Objects:  {\n\tGeometry: 1, \"\", \"\" {\n\t\tBigNumber: 1852219572480\n\t}\n}\n"
+        )
+        big_number = find(elements, "BigNumber")
+        self.assertEqual(big_number.props, [1852219572480])
+        self.assertEqual(big_number.props_type, "L")
 
     def test_a_bare_integer_leaf_is_int32(self):
         self.assertEqual(find(self.elements, "FBXVersion").props_type, "I")
@@ -129,29 +151,79 @@ class TestScalarTyping(unittest.TestCase):
         self.assertEqual(properties.props_type, "")
 
 
-class TestBooleanLeaves(unittest.TestCase):
+class TestCharLeaves(unittest.TestCase):
     """A Model's "Shading" flag, seen in every real ASCII file Synty shipped: a bare letter
-    outside Properties70 rather than a number, which is the FBX SDK's one byte boolean."""
+    outside Properties70 rather than a number, which is the FBX SDK's one byte char property.
+    Binary carries the same value as a one byte "C" property holding the letter itself, so
+    the parser must carry the letter through as a byte rather than a Python bool."""
 
-    def test_a_bare_t_is_true(self):
+    def test_a_bare_t_is_the_byte_t(self):
         elements, _ = fbx_ascii.parse("Objects:  {\n\tModel: 1, \"\", \"\" {\n\t\tShading: T\n\t}\n}\n")
         shading = find(elements, "Shading")
-        self.assertEqual(shading.props, [True])
+        self.assertEqual(shading.props, [b"T"])
         self.assertEqual(shading.props_type, "C")
 
-    def test_a_bare_y_is_also_true(self):
+    def test_a_bare_y_is_the_byte_y(self):
         elements, _ = fbx_ascii.parse("Objects:  {\n\tModel: 1, \"\", \"\" {\n\t\tShading: Y\n\t}\n}\n")
-        self.assertEqual(find(elements, "Shading").props, [True])
+        shading = find(elements, "Shading")
+        self.assertEqual(shading.props, [b"Y"])
+        self.assertEqual(shading.props_type, "C")
 
-    def test_a_bare_f_is_false(self):
+    def test_a_bare_f_is_the_byte_f(self):
         elements, _ = fbx_ascii.parse("Objects:  {\n\tModel: 1, \"\", \"\" {\n\t\tShading: F\n\t}\n}\n")
         shading = find(elements, "Shading")
-        self.assertEqual(shading.props, [False])
+        self.assertEqual(shading.props, [b"F"])
         self.assertEqual(shading.props_type, "C")
 
-    def test_a_bare_n_is_also_false(self):
+    def test_a_bare_n_is_the_byte_n(self):
         elements, _ = fbx_ascii.parse("Objects:  {\n\tModel: 1, \"\", \"\" {\n\t\tShading: N\n\t}\n}\n")
-        self.assertEqual(find(elements, "Shading").props, [False])
+        shading = find(elements, "Shading")
+        self.assertEqual(shading.props, [b"N"])
+        self.assertEqual(shading.props_type, "C")
+
+
+# What Python type and shape each type character carries. This is the module's actual
+# contract: a later task's encode_bin builder trusts this pairing without checking it again,
+# and dispatches on the character alone (add_char asserts bytes of length 1, and so on).
+TYPE_INVARIANTS = {
+    "S": lambda value: isinstance(value, str),
+    "I": lambda value: isinstance(value, int),
+    "L": lambda value: isinstance(value, int),
+    "Y": lambda value: isinstance(value, int),
+    "D": lambda value: isinstance(value, float),
+    "C": lambda value: isinstance(value, bytes) and len(value) == 1,
+    "R": lambda value: isinstance(value, bytes),
+    "d": lambda value: isinstance(value, list) and all(isinstance(item, float) for item in value),
+    "i": lambda value: isinstance(value, list) and all(isinstance(item, int) for item in value),
+}
+
+
+class TestTypeInvariant(unittest.TestCase):
+    """Every property's Python type must match the character it is tagged with. No other
+    test asserts this directly, and it is the one thing the next task, which hands the tree
+    to Blender's encode_bin writer, depends on completely."""
+
+    def setUp(self):
+        self.elements, _ = fbx_ascii.parse(SAMPLE)
+
+    def test_every_property_matches_its_type_character(self):
+        found = set()
+        self._check(self.elements, found)
+        # "R", raw bytes, is the one character no code path in this module assigns: none of
+        # the 21 real ASCII files Synty shipped carries a property that would need it, and
+        # this module invents nothing it cannot point at a real file for. Every other
+        # character in the contract is exercised by SAMPLE.
+        self.assertEqual(found, set(TYPE_INVARIANTS) - {"R"})
+
+    def _check(self, elements, found):
+        for element in elements:
+            for value, character in zip(element.props, element.props_type):
+                invariant = TYPE_INVARIANTS.get(character)
+                self.assertIsNotNone(invariant, f"no invariant recorded for type {character!r}")
+                self.assertTrue(invariant(value),
+                                 f"{element.id}: {value!r} does not match type {character!r}")
+                found.add(character)
+            self._check(element.elems, found)
 
 
 class TestPropertyRows(unittest.TestCase):
@@ -170,6 +242,14 @@ class TestPropertyRows(unittest.TestCase):
 
     def test_a_compound_declares_no_value(self):
         self.assertEqual(self.rows[2].props_type, "SSSS")
+        # A row that names a no-value type but carries one anyway would silently succeed if
+        # the distinction were not honored, falling back to reading the extra token by
+        # syntax exactly as an unrecognized type does.
+        with self.assertRaises(fbx_ascii.ParseError):
+            fbx_ascii.parse(
+                'Objects:  {\n\tModel: 1, "", "" {\n\t\tProperties70:  {\n'
+                '\t\t\tP: "Original", "Compound", "", "",1\n\t\t}\n\t}\n}\n'
+            )
 
     def test_a_string_row_is_a_string(self):
         self.assertEqual(self.rows[3].props_type, "SSSSS")
