@@ -18,6 +18,11 @@ import sys
 import urllib.parse
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The same rule flavor_variants strips a sibling by, shared so the two cannot disagree
+# and start failing a correct sibling over a key nothing renders.
+from manifests import is_diagnostic
+
 GLB_MAGIC = 0x46546C67
 CHUNK_JSON = 0x4E4F534A
 
@@ -25,25 +30,12 @@ CHUNK_JSON = 0x4E4F534A
 # still holds more than one of them renders all of them at once.
 LOD_SUFFIX = re.compile(r"^(?P<base>.+)_LOD(?P<level>\d+)$", re.IGNORECASE)
 
-# What a generated flavor variant is allowed to hold differently from the base it was
-# copied from. It is its base wearing a different texture, so the texture, the companion
-# maps that belong to that texture, and the names and counts that follow from them may
-# differ, and nothing else may.
+# What a generated flavor variant may hold differently from the base it was copied from:
+# its texture, the companion maps that belong to that texture, and the names and counts
+# that follow from them. Nothing else.
 VARIANT_KEYS = {"name", "used_by", "variant_of", "source_names", "albedo_texture",
                 "emission_texture", "emission_energy", "emission_color",
                 "normal_texture", "normal_scale"}
-
-
-def is_diagnostic(key):
-    """True for a key recording how an observed material's own reference resolved.
-
-    A generated variant has no FBX reference of its own, so ``flavor_variants`` strips all
-    of these from a sibling while its base keeps them. Every one of them therefore differs,
-    and none of them describes anything the Godot generator reads. This mirrors the rule in
-    ``synty_convert.flavor_variants`` deliberately: if the two ever disagree, a sibling
-    starts failing the audit for a key nothing renders.
-    """
-    return key in ("reference", "match") or key.endswith(("_reference", "_match"))
 
 
 def gltf_of(path):
@@ -108,8 +100,8 @@ def audit_models(root, failures, stats):
 def on_disk(reference, res_prefix, dst):
     """Map a res:// path from a manifest back to the converted file it names.
 
-    The converter is not a Godot project, so res:// only makes sense relative to where
-    the output is destined to land; everything under the prefix mirrors the output tree.
+    This repo is not a Godot project, so res:// only means anything relative to where the
+    output is destined to land. Everything under the prefix mirrors the output tree.
     """
     prefix = res_prefix.rstrip("/") + "/"
     if not reference.startswith(prefix):
@@ -142,7 +134,6 @@ def audit_manifests(root, dst, res_prefix, failures, stats):
                     if unexpected:
                         failures["variant differs from its base beyond its texture"].append(
                             f"{path}: {entry['name']} ({sorted(unexpected)})")
-                    # Permitting the texture to differ is not the same as requiring it to.
                     # A variant that resolved back onto its base's own texture renders
                     # identically to it, which makes swapping to it pointless.
                     if "albedo_texture" not in differs:

@@ -10,7 +10,9 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import audit
-import synty_convert
+import conversion
+import manifests
+import material_names
 
 PACK = "FantasyKingdom"
 RES_PREFIX = "res://assets"
@@ -51,7 +53,7 @@ class FlavorVariants(unittest.TestCase):
                   "roughness": 0.75, "metallic": 0.5}
         entry = entry_for("Textures/Atlas_01_A.png")
         warnings = []
-        siblings = synty_convert.flavor_variants(
+        siblings = manifests.flavor_variants(
             record, entry, SETS, {}, self.output_root, PACK, RES_PREFIX, warnings)
         self.assertEqual(len(siblings), 1)
         self.assertEqual(siblings[0]["name"], "Atlas_01_B_R75_M50")
@@ -65,7 +67,7 @@ class FlavorVariants(unittest.TestCase):
                   "reference": "Atlas_01_A.png", "match": "exact"}
         entry = entry_for("Textures/Atlas_01_A.png")
         warnings = []
-        siblings = synty_convert.flavor_variants(
+        siblings = manifests.flavor_variants(
             record, entry, SETS, {}, self.output_root, PACK, RES_PREFIX, warnings)
         self.assertEqual(len(siblings), 1)
         sibling = siblings[0]
@@ -82,12 +84,9 @@ class FlavorVariants(unittest.TestCase):
         self.assertEqual(sibling["metallic"], record["metallic"])
 
     def test_sibling_does_not_carry_alpha_diagnostics_from_its_base(self):
-        # alpha_reference/alpha_match describe how an observed material's own alpha
-        # channel independently resolved against a file different from its albedo. A
-        # generated sibling never resolved anything against an FBX, so carrying these
-        # forward from the base it was copied from would describe a resolution that
-        # never happened for it, the same bug the bare reference/match pops above exist
-        # to prevent.
+        # alpha_reference and alpha_match describe how an observed material's alpha
+        # channel resolved against a file different from its albedo. A sibling resolved
+        # nothing, so carrying these forward would describe something that never happened.
         self.mirror("Textures/Atlas_01_B.png")
         record = {"name": "Atlas_01_A_R75_M50", "used_by": 4, "source_names": ["SM_Foo"],
                   "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
@@ -95,7 +94,7 @@ class FlavorVariants(unittest.TestCase):
                   "alpha_reference": "Mask_01_A.png", "alpha_match": "suffix"}
         entry = entry_for("Textures/Atlas_01_A.png")
         warnings = []
-        siblings = synty_convert.flavor_variants(
+        siblings = manifests.flavor_variants(
             record, entry, SETS, {}, self.output_root, PACK, RES_PREFIX, warnings)
         self.assertEqual(len(siblings), 1)
         self.assertNotIn("alpha_reference", siblings[0])
@@ -108,7 +107,7 @@ class FlavorVariants(unittest.TestCase):
                   "roughness": 0.75, "metallic": 0.5}
         entry = entry_for("Textures/Atlas_01_A.png")
         warnings = []
-        siblings = synty_convert.flavor_variants(
+        siblings = manifests.flavor_variants(
             record, entry, SETS, {}, self.output_root, PACK, RES_PREFIX, warnings)
         self.assertEqual(siblings, [])
         self.assertEqual(len(warnings), 1)
@@ -122,7 +121,7 @@ class FlavorVariants(unittest.TestCase):
                   "roughness": 0.75, "metallic": 0.5}
         entry = entry_for("Textures/Atlas_01_A.png")
         warnings = []
-        siblings = synty_convert.flavor_variants(
+        siblings = manifests.flavor_variants(
             record, entry, SETS, {}, self.output_root, PACK, RES_PREFIX, warnings)
         self.assertEqual(siblings, [])
         self.assertEqual(warnings, [])
@@ -133,7 +132,7 @@ class FlavorVariants(unittest.TestCase):
                   "roughness": 0.75, "metallic": 0.5}
         entry = entry_for("Textures/Horse_01.png")
         warnings = []
-        siblings = synty_convert.flavor_variants(
+        siblings = manifests.flavor_variants(
             record, entry, SETS, {}, self.output_root, PACK, RES_PREFIX, warnings)
         self.assertEqual(siblings, [])
         self.assertEqual(warnings, [])
@@ -162,7 +161,7 @@ class FlavorVariants(unittest.TestCase):
                     "emission_color": [0.0, 0.0, 0.0], "emission_strength": 1.0,
                     "roughness": roughness, "metallic": 0.0, "normal_strength": 1.0}
 
-        totals = synty_convert.Totals()
+        totals = conversion.Totals()
         totals.materials = {PACK: {
             "Atlas_01_A_R75": material_entry("A", 3, "SM_Foo", 0.748),
             "Atlas_01_C_R75": material_entry("C", 2, "SM_Bar", 0.752),
@@ -172,7 +171,7 @@ class FlavorVariants(unittest.TestCase):
             materials_root = Path(materials_dir)
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                synty_convert.write_manifests(
+                manifests.write_manifests(
                     totals, materials_root, self.output_root, RES_PREFIX, contexts)
             output = stdout.getvalue()
             manifest = json.loads(
@@ -224,7 +223,7 @@ class FlavorVariants(unittest.TestCase):
                     "emission_color": [0.0, 0.0, 0.0], "emission_strength": 1.0,
                     "roughness": 0.55, "metallic": 0.0, "normal_strength": 1.0}
 
-        totals = synty_convert.Totals()
+        totals = conversion.Totals()
         totals.materials = {PACK: {
             "Atlas_01_A_R55": material_entry("A", 3, "SM_Foo"),
             "Atlas_01_C_R55": material_entry("C", 2, "SM_Bar"),
@@ -234,7 +233,7 @@ class FlavorVariants(unittest.TestCase):
             materials_root = Path(materials_dir)
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                synty_convert.write_manifests(
+                manifests.write_manifests(
                     totals, materials_root, self.output_root, RES_PREFIX, contexts)
             output = stdout.getvalue()
             manifest = json.loads(
@@ -254,14 +253,10 @@ class FlavorVariants(unittest.TestCase):
         self.assertEqual(len(survivors), 1)
 
     def test_generated_variant_collision_stays_silent_despite_stale_diagnostic_keys(self):
-        # A's own emission map was matched by naming heuristic, so A's observed record
-        # carries emission_reference/emission_match. C has no emission at all. Neither base
-        # declares an emission companion for member B, so both of their generated B siblings
-        # render identically -- with no emission of any kind -- and the collision between them
-        # must stay silent. Before apply_channels also cleared the diagnostic keys, A's
-        # sibling kept its stale emission_reference/emission_match and collided loudly against
-        # C's sibling, which never had them, even though every key the Godot generator reads
-        # was byte-identical between the two.
+        # A's emission map was matched by heuristic, so A's record carries
+        # emission_reference and emission_match; C has no emission at all. Neither declares
+        # an emission companion for member B, so both B siblings render identically and the
+        # collision must stay silent even though the two bases differ diagnostically.
         for letter in ("A", "B", "C"):
             self.mirror(f"Textures/Atlas_01_{letter}.png")
         self.mirror("Textures/Emissive_01_A.png")
@@ -293,7 +288,7 @@ class FlavorVariants(unittest.TestCase):
                   "emission_color": [0.0, 0.0, 0.0], "emission_strength": 1.0,
                   "roughness": 0.75, "metallic": 0.0, "normal_strength": 1.0}
 
-        totals = synty_convert.Totals()
+        totals = conversion.Totals()
         totals.materials = {PACK: {
             "Atlas_01_A_R75": entry_a,
             "Atlas_01_C_R75": entry_c,
@@ -303,7 +298,7 @@ class FlavorVariants(unittest.TestCase):
             materials_root = Path(materials_dir)
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                synty_convert.write_manifests(
+                manifests.write_manifests(
                     totals, materials_root, self.output_root, RES_PREFIX, contexts)
             output = stdout.getvalue()
             manifest = json.loads(
@@ -343,7 +338,7 @@ class SiblingCompanions(unittest.TestCase):
     def variants(self, record, entry, companions, warnings=None):
         if warnings is None:
             warnings = []
-        return synty_convert.flavor_variants(record, entry, SETS, companions,
+        return manifests.flavor_variants(record, entry, SETS, companions,
                                              self.output_root, PACK, RES_PREFIX, warnings)
 
     def test_sibling_takes_its_own_members_emissive_not_the_bases(self):
@@ -356,7 +351,7 @@ class SiblingCompanions(unittest.TestCase):
             "member": "Textures/Emissive_01_A.png", "method": "companion",
             "texture_source": "Textures/Emissive_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Emissive_01_A.png")}
-        record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+        record = {"name": material_names.canonical_name(entry), "used_by": 4,
                   "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
                   "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
                   "emission_texture": "res://assets/FantasyKingdom/Textures/Emissive_01_A.png",
@@ -378,7 +373,7 @@ class SiblingCompanions(unittest.TestCase):
             "member": "Textures/Emissive_01_A.png", "method": "companion",
             "texture_source": "Textures/Emissive_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Emissive_01_A.png")}
-        record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+        record = {"name": material_names.canonical_name(entry), "used_by": 4,
                   "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
                   "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
                   "emission_texture": "res://assets/FantasyKingdom/Textures/Emissive_01_A.png",
@@ -401,7 +396,7 @@ class SiblingCompanions(unittest.TestCase):
             "member": "Textures/Normal_01_A.png", "method": "companion",
             "texture_source": "Textures/Normal_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Normal_01_A.png")}
-        record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+        record = {"name": material_names.canonical_name(entry), "used_by": 4,
                   "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
                   "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
                   "normal_texture": "res://assets/FantasyKingdom/Textures/Normal_01_A.png",
@@ -422,7 +417,7 @@ class SiblingCompanions(unittest.TestCase):
             "member": "Textures/Normal_01_A.png", "method": "companion",
             "texture_source": "Textures/Normal_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Normal_01_A.png")}
-        record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+        record = {"name": material_names.canonical_name(entry), "used_by": 4,
                   "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
                   "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
                   "normal_texture": "res://assets/FantasyKingdom/Textures/Normal_01_A.png",
@@ -458,19 +453,15 @@ class SiblingCompanions(unittest.TestCase):
         albedo = {"member": "Textures/Atlas_01_A.png", "texture_source": "Textures/Atlas_01_A.png"}
         entry = entry_for("Textures/Atlas_01_A.png")
         entry["channels"] = {"albedo": albedo, "alpha": albedo}
-        channels = synty_convert.sibling_channels(
+        channels = manifests.sibling_channels(
             entry, "Textures/Atlas_01_B.png", {}, self.output_root, PACK, [])
         self.assertIs(channels["alpha"], channels["albedo"])
         self.assertEqual(channels["alpha"]["member"], "Textures/Atlas_01_B.png")
 
     def test_base_emission_texture_is_not_resurrected_when_a_sibling_has_no_companion_map(self):
-        # The base's glow comes entirely from a map, so nothing about it survives a sibling
-        # whose member declares no companion. This is the scenario the old, weaker version of
-        # this test could not have caught: it built `record` with the emission keys already
-        # holding the correct final answer, so the assertions passed whether or not
-        # apply_channels actually cleared anything. Here the copied record starts out with the
-        # base's own emission_texture and emission_energy, which only a working clear-then-
-        # rewrite removes.
+        # The base's glow comes entirely from a map, so nothing of it survives a sibling
+        # whose member declares no companion. The record deliberately starts out holding the
+        # base's emission keys, which only a working clear-then-rewrite removes.
         self.mirror("Textures/Atlas_01_B.png")
         self.mirror("Textures/Emissive_01_A.png")
         entry = entry_for("Textures/Atlas_01_A.png")
@@ -478,7 +469,7 @@ class SiblingCompanions(unittest.TestCase):
             "member": "Textures/Emissive_01_A.png", "method": "companion",
             "texture_source": "Textures/Emissive_01_A.png",
             "texture": str(self.output_root / PACK / "Textures/Emissive_01_A.png")}
-        record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+        record = {"name": material_names.canonical_name(entry), "used_by": 4,
                   "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
                   "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
                   "emission_texture": "res://assets/FantasyKingdom/Textures/Emissive_01_A.png",
@@ -490,20 +481,13 @@ class SiblingCompanions(unittest.TestCase):
         self.assertNotIn("emission_energy", siblings[0])
 
     def test_emissive_color_is_not_dropped_when_a_member_has_no_companion_map(self):
-        # apply_channels reaches a flat emission_color through its
-        # `elif any(entry["emission_color"])` branch, which is independent of companions:
-        # emission_color is an entry-level value that sibling_channels never touches, so a
-        # member declaring no companion still carries the base's declared color. Every other
-        # fixture in this suite uses [0.0, 0.0, 0.0], which is falsy and never enters that
-        # branch, so nothing else in the suite protects it. apply_channels clears
-        # emission_color from the copied sibling before rewriting it, so only a working elif
-        # branch puts it back; the record built here deliberately mirrors what a real base
-        # material would already carry, since a flat color is not something a sibling recolor
-        # ever changes.
+        # A flat emission_color is an entry-level value sibling_channels never touches, so a
+        # member declaring no companion still carries the base's color. Every other fixture
+        # here uses [0, 0, 0], which is falsy and never reaches that branch.
         self.mirror("Textures/Atlas_01_B.png")
         entry = entry_for("Textures/Atlas_01_A.png", emission_color=[1.0, 0.0, 0.0],
                           emission_strength=2.5)
-        record = {"name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+        record = {"name": material_names.canonical_name(entry), "used_by": 4,
                   "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
                   "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
                   "emission_color": [1.0, 0.0, 0.0], "emission_energy": 2.5}
@@ -514,23 +498,12 @@ class SiblingCompanions(unittest.TestCase):
 
 
 class DiagnosticKeysAgreeWithAudit(unittest.TestCase):
-    """Regression test for Minor 3: audit.is_diagnostic must recognize every key
-    flavor_variants strips from a generated sibling.
+    """audit.is_diagnostic must recognize every key flavor_variants strips from a sibling.
 
-    Both rules encode the same fact, that a sibling never resolved anything against an
-    FBX of its own, so it carries no key describing how a reference resolved, but they
-    live in two files and are each tested separately today. Nothing asserts the two
-    agree, so a future edit to either one, narrowing is_diagnostic's suffix check or
-    widening flavor_variants to strip a new diagnostic key, could silently desync them,
-    and audit.py would start failing a correct sibling for a key that renders nothing.
-    Placed in this file rather than in an audit-specific test file because the fixture
-    the assertion needs, a real flavor_variants call producing a real sibling with all
-    four channels populated, already lives here for the tests above it.
-
-    The assertion below computes the stripped key set from the difference between the
-    base record and the generated sibling, rather than restating the diagnostic key
-    names as a literal list, so it is the actual stripping behavior under test, not a
-    second copy of the same assumption.
+    Both encode the same fact: a sibling resolved nothing against an FBX of its own, so it
+    carries no key describing how a reference resolved. The stripped set is computed from
+    the difference between base and sibling rather than restated as a literal list, so what
+    is under test is the actual stripping behavior.
     """
 
     def setUp(self):
@@ -572,7 +545,7 @@ class DiagnosticKeysAgreeWithAudit(unittest.TestCase):
         # Every diagnostic key the real write_manifests loop can produce across all four
         # channels, so the strip has something of each shape to remove.
         record = {
-            "name": synty_convert.material_names.canonical_name(entry), "used_by": 4,
+            "name": material_names.canonical_name(entry), "used_by": 4,
             "source_names": ["SM_Foo"], "roughness": 0.75, "metallic": 0.5,
             "albedo_texture": "res://assets/FantasyKingdom/Textures/Atlas_01_A.png",
             "emission_texture": "res://assets/FantasyKingdom/Textures/Emissive_01_A.png",
@@ -585,7 +558,7 @@ class DiagnosticKeysAgreeWithAudit(unittest.TestCase):
             "normal_reference": "Normal_01_A.psd", "normal_match": "suffix",
         }
         warnings = []
-        siblings = synty_convert.flavor_variants(
+        siblings = manifests.flavor_variants(
             record, entry, SETS, companions, self.output_root, PACK, RES_PREFIX, warnings)
         self.assertEqual(len(siblings), 1)
         self.assertEqual(warnings, [])

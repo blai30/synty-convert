@@ -6,7 +6,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import synty_convert
+import conversion
+import reporting
 
 ASCII_FBX = "RuntimeError: Error: ASCII FBX files are not supported"
 
@@ -14,7 +15,7 @@ ASCII_FBX = "RuntimeError: Error: ASCII FBX files are not supported"
 def run(totals):
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout):
-        synty_convert.report_failures(totals)
+        reporting.report_failures(totals)
     return stdout.getvalue()
 
 
@@ -38,7 +39,7 @@ class FailuresNameTheirPackAndReason(unittest.TestCase):
     """
 
     def setUp(self):
-        self.totals = synty_convert.Totals()
+        self.totals = conversion.Totals()
 
     def test_nothing_is_printed_when_nothing_failed(self):
         self.assertEqual(run(self.totals), "")
@@ -74,7 +75,7 @@ class FailuresGroupUnderOneReason(unittest.TestCase):
     """
 
     def setUp(self):
-        self.totals = synty_convert.Totals()
+        self.totals = conversion.Totals()
 
     def test_one_reason_over_many_models_collapses_to_one_heading(self):
         self.totals.failures = [failure("Horror_Carnival", f"SM_Prop_Plushie_{i:02d}.fbx")
@@ -102,20 +103,20 @@ class FailureReasonDropsTheModelsOwnPath(unittest.TestCase):
 
     def test_the_quoted_path_is_removed(self):
         src, _, message = failure("PackA", "SM_Prop_Barrel_01.fbx")
-        self.assertEqual(synty_convert.failure_reason(src, message), ASCII_FBX)
+        self.assertEqual(reporting.failure_reason(src, message), ASCII_FBX)
 
     def test_a_message_without_a_path_is_unchanged(self):
         src, _, message = failure("PackA", "SM_Prop_Barrel_01.fbx", quote_path=False)
-        self.assertEqual(synty_convert.failure_reason(src, message), ASCII_FBX)
+        self.assertEqual(reporting.failure_reason(src, message), ASCII_FBX)
 
     def test_an_unrelated_path_is_left_alone(self):
         # Only the job's own path is stripped; a path naming something else is evidence.
         message = ["RuntimeError: cannot open 'C:\\\\packs\\\\PackB\\\\Textures\\\\atlas.png'"]
-        self.assertIn("atlas.png", synty_convert.failure_reason("C:\\packs\\PackA\\a.fbx", message))
+        self.assertIn("atlas.png", reporting.failure_reason("C:\\packs\\PackA\\a.fbx", message))
 
     def test_a_message_that_was_only_a_path_does_not_become_empty(self):
         src, _, _ = failure("PackA", "SM_Prop_Barrel_01.fbx")
-        self.assertEqual(synty_convert.failure_reason(src, [src]), "unknown error")
+        self.assertEqual(reporting.failure_reason(src, [src]), "unknown error")
 
 
 class RepairsAreReported(unittest.TestCase):
@@ -124,15 +125,15 @@ class RepairsAreReported(unittest.TestCase):
     def report(self, totals):
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            synty_convert.report(totals, 1.0)
+            reporting.report(totals, 1.0)
         return stdout.getvalue()
 
     def test_repairs_are_counted_on_their_own_line(self):
         self.assertIn("Repaired  21 ASCII FBX",
-                      self.report(synty_convert.Totals(converted=21, repaired=21)))
+                      self.report(conversion.Totals(converted=21, repaired=21)))
 
     def test_a_run_with_no_repairs_says_nothing(self):
-        self.assertNotIn("Repaired", self.report(synty_convert.Totals(converted=21)))
+        self.assertNotIn("Repaired", self.report(conversion.Totals(converted=21)))
 
 
 if __name__ == "__main__":

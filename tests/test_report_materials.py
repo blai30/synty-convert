@@ -7,7 +7,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import synty_convert
+import conversion
+import reporting
 
 PACK = "FantasyKingdom"
 
@@ -27,13 +28,13 @@ def material_entry(name, method, reference, used_by=3, source="SM_Castle_Evil_01
 def run_report(totals, contexts):
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout):
-        synty_convert.report_materials(totals, contexts)
+        reporting.report_materials(totals, contexts)
     return stdout.getvalue()
 
 
 def make_totals(materials):
     """A Totals carrying only what report_materials reads: the per-pack materials dict."""
-    totals = synty_convert.Totals()
+    totals = conversion.Totals()
     totals.materials = materials
     return totals
 
@@ -69,7 +70,7 @@ class FilledSurvivesTheMerge(unittest.TestCase):
     """
 
     def setUp(self):
-        self.totals = synty_convert.Totals()
+        self.totals = conversion.Totals()
         # The merge kept the normally-resolved copy: no "flavor" method survives here,
         # even though the fill (recorded separately in totals.filled) did happen.
         self.totals.materials = {PACK: {
@@ -111,7 +112,7 @@ class DeadChecksModelAndMaterialTogether(unittest.TestCase):
     """
 
     def test_narrow_binding_sharing_a_material_glob_is_dead_when_only_the_broad_one_fired(self):
-        totals = synty_convert.Totals()
+        totals = conversion.Totals()
         totals.materials = {PACK: {"Atlas_01_A": material_entry(
             "Atlas_01_A", "flavor", None, source="SM_Bld_Preset_Tavern_01")}}
         # Only the broad, preset-scoped binding fired; the prop-scoped one shares the same
@@ -144,7 +145,7 @@ class UntexturedCountExcludesFills(unittest.TestCase):
     """
 
     def test_filled_material_is_not_counted_as_untextured(self):
-        totals = synty_convert.Totals()
+        totals = conversion.Totals()
         totals.materials = {PACK: {
             "Wall_Brick_01": material_entry("Wall_Brick_01", "flavor", None)}}
         contexts = {PACK: {"materials": {"sets": {}, "bind": []}}}
@@ -172,7 +173,7 @@ class CompanionReporting(unittest.TestCase):
                              "source_root": source_root or self.SOURCE_ROOT}}
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            synty_convert.report_materials(totals, contexts, judge_bindings=judge)
+            reporting.report_materials(totals, contexts, judge_bindings=judge)
         return buffer.getvalue()
 
     def test_a_companion_that_fired_is_named_with_its_count(self):
@@ -271,10 +272,8 @@ class CompanionReporting(unittest.TestCase):
 
     def test_a_companion_on_an_undrawn_flavor_set_is_still_reported_dead(self):
         # The set exists and the companion is one of its own members, but no observed
-        # material's albedo belongs to this set, so write_manifests never generates a
-        # sibling for it either. A fix that grants reachability merely because a texture
-        # belongs to some flavor set, without checking the set was actually drawn from,
-        # would wrongly clear this entry; the set genuinely goes unused here.
+        # albedo belongs to the set, so write_manifests generates no sibling for it either.
+        # Reachability has to check the set was drawn from, not just that it exists.
         materials = {"Wall_01": companion_material_entry("Textures/Wall_01.png")}
         sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png"],
                           "default": "Textures/Atlas_01_A.png"}}
@@ -295,11 +294,9 @@ class CompanionReporting(unittest.TestCase):
         self.assertNotIn("DEAD", output)
 
     def test_a_sibling_only_companion_is_reported_and_distinct_from_a_worn_one(self):
-        # Atlas_01_A is worn directly by an observed material and carries its own companion.
-        # Atlas_01_B is a member of the same flavor set but nothing wears it; write_manifests
-        # will still generate a sibling record for it that takes its own companion. The
-        # report must show both, and a reader scanning must be able to tell which is which
-        # without reading the source: only the worn one carries a model count.
+        # Atlas_01_A is worn directly. Atlas_01_B is in the same set but nothing wears it,
+        # though write_manifests still generates a sibling taking its own companion. Both
+        # get a line, and only the worn one carries a model count.
         materials = {"Atlas_01_A_Emissive": companion_material_entry(
             "Textures/Atlas_01_A.png", used_by=5,
             emission={"member": "Textures/Emissive_01_A.png", "method": "companion",
@@ -351,12 +348,9 @@ class CompanionReporting(unittest.TestCase):
         self.assertNotIn("sibling", output)
 
     def test_judge_bindings_false_suppresses_dead_but_not_the_sibling_line(self):
-        # Two declared companions: Atlas_01_B is sibling-reachable and Atlas_02_A is
-        # reachable by nothing at all. With judge_bindings False the DEAD verdict on
-        # Atlas_02_A must stay suppressed, exactly as before this change, while the sibling
-        # line for Atlas_01_B must still print: it states a fact about reachability that an
-        # incremental run can observe from what it did convert, not an absence claim about
-        # the whole pack, so the existing gate must not have been widened to cover it too.
+        # Atlas_01_B is sibling-reachable; Atlas_02_A is reachable by nothing. Without
+        # judging, the DEAD verdict on Atlas_02_A stays suppressed while the sibling line
+        # still prints: that is a fact about what this run converted, not an absence claim.
         materials = {"Atlas_01_A": companion_material_entry("Textures/Atlas_01_A.png")}
         sets = {"Atlas": {"members": ["Textures/Atlas_01_A.png", "Textures/Atlas_01_B.png"],
                           "default": "Textures/Atlas_01_A.png"}}
@@ -399,7 +393,7 @@ class UnjudgedRunNotice(unittest.TestCase):
             "sets": {}, "bind": bindings, "companions": companions}}}
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            synty_convert.report_materials(totals, contexts, judge_bindings=judge)
+            reporting.report_materials(totals, contexts, judge_bindings=judge)
         return buffer.getvalue()
 
     def test_companion_only_pack_is_named_when_unjudged(self):
@@ -444,14 +438,11 @@ class CompanionNamed(unittest.TestCase):
         )
         for name in companion_named_examples:
             with self.subTest(name=name):
-                self.assertTrue(synty_convert.companion_named(name))
+                self.assertTrue(reporting.companion_named(name))
 
     def test_recognizes_the_misspellings_synty_actually_shipped(self):
-        # Every one of these is a real filename found on disk, not a hypothetical: a doubled
-        # m (Dungeon Pack, FantasyKingdom, Pirate Pack), a doubled m with a doubled s
-        # (Lavawave_Hot_Inverted_Emmissive.png in AridDesert, the bug that opened this gap),
-        # a doubled m against the "-sion" ending (BattleRoyale), and a vowel-less abbreviation
-        # of "Normal" (Gang Warfare).
+        # Every one of these is a real shipped filename: a doubled m, a doubled m with a
+        # doubled s, a doubled m against the "-sion" ending, and a vowel-less "Normal".
         misspelled_companion_named_examples = (
             "Emmisive_01",
             "Lavawave_Hot_Inverted_Emmissive",
@@ -462,13 +453,13 @@ class CompanionNamed(unittest.TestCase):
         )
         for name in misspelled_companion_named_examples:
             with self.subTest(name=name):
-                self.assertTrue(synty_convert.companion_named(name))
+                self.assertTrue(reporting.companion_named(name))
 
     def test_rejects_an_ordinary_atlas_name(self):
         ordinary_names = ("PolygonCasino_Texture_01_A", "Wall_Brick_01")
         for name in ordinary_names:
             with self.subTest(name=name):
-                self.assertFalse(synty_convert.companion_named(name))
+                self.assertFalse(reporting.companion_named(name))
 
 
 if __name__ == "__main__":
