@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="docs/images/splash.png" width="900" alt="A floating island holding models from fourteen Synty packs at once: a fantasy village, a carnival with a ferris wheel and big top, a frontier town, a tugboat and a gantry crane, and a sci-fi tower, with two starfighters overhead.">
+</p>
+
 # Synty FBX to Godot GLB converter
 
 Converts [Synty](https://syntystore.com) asset packs from FBX into GLB that drops straight into a Godot 4 project: correct scale, correct axes, shared materials, and a large reduction in file size.
+
+Every model above is converter output, dropped in at its real world scale and rendered untouched.
 
 The output mirrors the source tree exactly. Only `.fbx` becomes `.glb`; textures, licenses and everything else are copied through untouched.
 
@@ -150,7 +156,7 @@ Pure Python, no Blender needed. They cover the parts that decide what a model en
 
 ## What is committed
 
-Nothing this repo generates. `assets/` and `materials/` are gitignored, since both are reproducible by rerunning the converter. The packs are ignored too: `synty_packs_fbx/` keeps only a `.gitkeep`. What is tracked is the tool itself, plus the curated override files you are meant to hand edit.
+Nothing the converter generates. `assets/` and `materials/` are gitignored, since both are reproducible by rerunning it. The packs are ignored too: `synty_packs_fbx/` keeps only a `.gitkeep`. What is tracked is the tool itself, plus the curated override files you are meant to hand edit.
 
 In **your Godot project** the opposite applies. Commit `materials/` there: it is small, and the `.tres` are where you would tune things like `texture_filter` for atlas bleed. Rerunning the generator overwrites them; reconverting models does not.
 
