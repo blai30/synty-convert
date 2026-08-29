@@ -4,13 +4,11 @@ Invoked as::
 
     blender --background --factory-startup --python blender_convert.py -- <jobfile.json>
 
-The job file holds ``{"options": {...}, "jobs": [{"src": ..., "dst": ...}, ...]}``.
-One ``@@RESULT {json}`` line is printed per job for the parent process to collect.
+The job file holds ``{"options": {...}, "jobs": [{"src": ..., "dst": ...}, ...]}`` and one
+``@@RESULT {json}`` line is printed per job for the parent process to collect.
 
-Each job runs the same pipeline: import the FBX, strip every material, normalize the
-armature so Godot receives an identity-transform Skeleton3D, then export a GLB. Jobs
-flagged ``split`` also have any character head separated onto its own node first; see
-``split_character_head.py``.
+Every job runs the same pipeline: import the FBX, rebuild its materials on the pack's
+shipped textures, normalize transforms so Godot receives identity nodes, then export a GLB.
 """
 
 from __future__ import annotations
@@ -41,15 +39,12 @@ import texture_matching
 
 RESULT_PREFIX = "@@RESULT "
 
-# Synty FBX come from Maya: centimeter units and a Y-up axis, which Blender's importer
-# parks on the armature object as scale 0.01 plus a 90 degree X rotation.
 UNIFORM_SCALE_TOLERANCE = 1e-5
 IDENTITY_TOLERANCE = 1e-6
 STATIC_CURVE_TOLERANCE = 1e-6
 
 # Blender's FBX importer drives one Principled BSDF socket per FBX material property. These
-# are the four Synty's files actually connect anything to, and the name each becomes in a
-# material record.
+# are the four Synty's files connect anything to, under the name each takes in a record.
 CHANNEL_SOCKETS = {"albedo": "Base Color", "alpha": "Alpha", "emission": "Emission Color",
                    "normal": "Normal"}
 
@@ -57,13 +52,11 @@ CHANNEL_SOCKETS = {"albedo": "Base Color", "alpha": "Alpha", "emission": "Emissi
 # every Synty mask is a cutout, and cutouts sort correctly where blending does not.
 ALPHA_CUTOFF = 0.5
 
-# How Synty names a level of a foliage LOD chain: SM_Env_Tree_Meadow_01_LOD0 through _LOD3,
-# with a model's trunk and its canopy each carrying their own chain.
+# How Synty names a level of a foliage LOD chain: SM_Env_Tree_Meadow_01_LOD0 through _LOD3.
 LOD_SUFFIX = re.compile(r"^(?P<base>.+)_LOD(?P<level>\d+)$", re.IGNORECASE)
 
 # Largest island, in triangles, still counted as a leaf card rather than woody geometry.
-# Synty's foliage cards are single quads; the trunks and branches they hang off run to
-# hundreds of triangles, so anything in between separates the two cleanly.
+# Synty's cards are single quads and the trunks they hang off run to hundreds of triangles.
 LEAF_MAX_TRIS = 8
 
 # A mesh holding a model's twigs rather than its trunk and canopy, which needs no splitting.
@@ -218,11 +211,10 @@ def is_static(fcurve):
 def drop_static_takes():
     """Remove object-level transform curves that never change value.
 
-    Synty exports a single-key 'Take 001' onto props that are not animated at all, which
-    just restates the importer's centimeter and Y-up transform. It carries no motion, so
-    all it does is block normalization and then, in the exported clip, reapply the very
-    transform normalization exists to remove. Pose-bone channels are left alone; they are
-    what real character takes are made of.
+    Synty puts a single-key 'Take 001' on props that are not animated at all, which only
+    restates the importer's unit and axis transform. It carries no motion, blocks
+    normalization, and then reapplies the very transform normalization exists to remove.
+    Pose-bone channels are left alone; real character takes are made of those.
     """
     actions = {action for obj in bpy.data.objects for action in actions_of(obj)}
     for action in actions:
@@ -240,11 +232,10 @@ def drop_static_takes():
 def normalize_transforms(warnings):
     """Bake the FBX unit and axis conversion out of every object transform.
 
-    Blender's importer parks Maya's centimeter units and Y-up axis on the top-level
-    objects as scale 0.01 plus a 90 degree X rotation. Exported as-is that becomes a
-    Node3D or Skeleton3D in Godot that is rotated and scaled to 1/100, which throws off
-    every BoneAttachment3D, collision shape and root-motion value. Folding it into the
-    mesh vertices, bone rest pose and animation curves leaves identity nodes instead.
+    Blender's importer parks Maya's centimeter units and Y-up axis on the top-level objects
+    as scale 0.01 plus a 90 degree X rotation. Exported as-is that reaches Godot as a
+    Node3D or Skeleton3D scaled to 1/100 and rotated, which throws off every
+    BoneAttachment3D, collision shape and root-motion value.
     """
     roots = [obj for obj in bpy.data.objects if obj.parent is None]
     if any(has_object_level_animation(obj) for obj in bpy.data.objects):
@@ -309,12 +300,11 @@ def bake_hierarchy(obj, inherited, warnings):
         child.matrix_basis = child_locals[child]
     for child in children:
         if child.parent_type == "BONE":
-            # Bone space just shrank by the same factor the rest pose did, and a bone
-            # parented child carries none of that on its own transform: the importer folds
-            # it into the parent inverse instead. So the factor is the whole of what has to
-            # be pushed down, and it has to reach the child's mesh and not just its offset.
-            # Rescaling the offset alone leaves a Synty ballista's bolt a hundred times the
-            # size of the ballista.
+            # Bone space shrank by the same factor the rest pose did, and a bone parented
+            # child carries none of that on its own transform: the importer folds it into
+            # the parent inverse instead. So the factor is the whole correction, and it has
+            # to reach the child's mesh, not just its offset. Rescaling the offset alone
+            # leaves a ballista's bolt a hundred times the size of the ballista.
             if factor is not None:
                 bake_hierarchy(child, Matrix.Scale(factor, 4), warnings)
         else:
@@ -351,8 +341,8 @@ def texture_reference(node):
     """The file an image node asks for, or None when the FBX named no file at all.
 
     Some Synty materials carry a texture slot whose path was emptied before export. Blender
-    falls back to the FBX object name for those, which is not a file name and cannot be
-    resolved against anything, so there is nothing to carry across.
+    falls back to the FBX object name there, which is not a file name and resolves against
+    nothing.
     """
     name = os.path.basename(node.image.filepath.replace("\\", "/")) or node.image.name
     suffix = os.path.splitext(name)[1].lower()
@@ -389,8 +379,8 @@ def describe_material(material):
     for channel, socket in CHANNEL_SOCKETS.items():
         node = image_behind(bsdf.inputs[socket]) if socket in bsdf.inputs else None
         info["references"][channel] = texture_reference(node) if node else None
-    # A socket's own value is what the FBX declared for that property. It only describes the
-    # material where no map covers it, which is how Maya treats a connected file.
+    # A socket's own value is what the FBX declared, and only describes the material where
+    # no map covers it, which is how Maya treats a connected file.
     info["color"] = socket_value(bsdf, "Base Color", info["color"])
     info["alpha"] = socket_value(bsdf, "Alpha", info["alpha"])
     info["emission_color"] = socket_value(bsdf, "Emission Color", info["emission_color"])
@@ -440,9 +430,8 @@ def resolve_texture(reference, context, warnings, channel):
 def transparency_of(record):
     """How a material is meant to blend: a bound mask cuts out, a bare value fades.
 
-    A mask that never resolved leaves nothing to cut with, so the material stays opaque
-    rather than claiming a cutout an engine would then set up a shader for and never use.
-    The name still records that one was asked for, and resolving it later brings it back.
+    A mask that never resolved leaves nothing to cut with, so the material stays opaque.
+    The name still records that one was asked for, so resolving it later brings it back.
     """
     if (record["channels"].get("alpha") or {}).get("texture_source"):
         return "scissor"
@@ -451,12 +440,33 @@ def transparency_of(record):
     return None
 
 
+def in_source(context, member):
+    """Where a pack-relative texture lives in the source pack."""
+    return os.path.join(context.get("source_root", ""), member.replace("/", os.sep))
+
+
+def in_output(context, member, description, warnings):
+    """The mirrored copy of a pack-relative texture, or None when it is not there yet.
+
+    No output pack at all means this is a scan rather than a conversion, so only warn once
+    there is a pack to have failed to mirror into. Claiming a path that is not on disk
+    would put a phantom file into the scan report that pack authors read.
+    """
+    relative = member.replace("/", os.sep)
+    output_root = context.get("output_root", "")
+    candidate = os.path.join(output_root, relative)
+    if os.path.exists(candidate):
+        return candidate
+    if output_root and os.path.isdir(output_root):
+        warnings.append(f"{description} not mirrored yet: {relative}")
+    return None
+
+
 def flavor_fill(context, source, material_name, warnings):
     """The declared default for a material that resolved to no texture of its own.
 
-    Shaped exactly like resolve_texture's return so everything downstream, the canonical
-    name above all, cannot tell the difference between a texture the FBX asked for and one
-    this supplied.
+    Shaped exactly like resolve_texture's return, so nothing downstream, the canonical name
+    above all, can tell a texture the FBX asked for from one this supplied.
     """
     declared = context.get("materials") or {}
     binding = material_flavors.match_binding(declared.get("bind") or [],
@@ -466,18 +476,8 @@ def flavor_fill(context, source, material_name, warnings):
         return None
     chosen = (declared.get("sets") or {})[binding["flavor"]]
     member = chosen["default"]
-    relative = member.replace("/", os.sep)
-    output_root = context.get("output_root", "")
-    candidate = os.path.join(output_root, relative)
-    exists = os.path.exists(candidate)
-    # Mirrors resolve_texture: an output pack that does not exist yet means this is a scan,
-    # and claiming a mirrored path that is not on disk would put a phantom file into the
-    # scan report that pack authors read. Only warn once there is an output pack to have
-    # failed to mirror into.
-    if not exists and output_root and os.path.isdir(output_root):
-        warnings.append(f"flavor default texture not mirrored yet: {relative}")
-    return {"texture": candidate if exists else None,
-            "texture_source": os.path.join(context.get("source_root", ""), relative),
+    return {"texture": in_output(context, member, "flavor default texture", warnings),
+            "texture_source": in_source(context, member),
             "reference": None, "method": "flavor", "score": None,
             "flavor": binding["flavor"], "binding": binding["material"],
             "binding_model": binding["model"], "member": member,
@@ -487,29 +487,17 @@ def flavor_fill(context, source, material_name, warnings):
 def companion_fill(context, channel, member, warnings):
     """The map declared for this atlas on this channel, or None when none is declared.
 
-    Shaped exactly like resolve_texture's return, so nothing downstream has to care which of
-    the two supplied a map. `member` carries the declared target, which is what lets
-    canonical_name recognize this map as the atlas's own and decline to name a material after
-    it. Keyed on what the albedo settled on rather than on what the FBX asked for, so one
-    declaration covers a material however it reached its atlas, including one the flavor fill
-    has just supplied.
+    Keyed on what the albedo settled on rather than on what the FBX asked for, so one
+    declaration covers a material however it reached its atlas, including through a flavor
+    fill. The returned ``member`` is the declared target, which is what lets canonical_name
+    recognize the map as the atlas's own and decline to name a material after it.
     """
     declared = ((context.get("materials") or {}).get("companions") or {}).get(member) or {}
     target = declared.get(channel)
     if not target:
         return None
-    relative = target.replace("/", os.sep)
-    output_root = context.get("output_root", "")
-    candidate = os.path.join(output_root, relative)
-    exists = os.path.exists(candidate)
-    # Mirrors flavor_fill: an output pack that does not exist yet means this is a scan, and
-    # claiming a mirrored path that is not on disk would put a phantom file into the scan
-    # report that pack authors read. Only warn once there is an output pack to have failed
-    # to mirror into.
-    if not exists and output_root and os.path.isdir(output_root):
-        warnings.append(f"companion {channel} texture not mirrored yet: {relative}")
-    return {"texture": candidate if exists else None,
-            "texture_source": os.path.join(context.get("source_root", ""), relative),
+    return {"texture": in_output(context, target, f"companion {channel} texture", warnings),
+            "texture_source": in_source(context, target),
             "reference": None, "method": "companion", "score": None, "member": target}
 
 
@@ -534,26 +522,23 @@ def resolve_materials(context, source, warnings):
                   ("source", "color", "alpha", "emission_color", "emission_strength",
                    "roughness", "metallic", "normal_strength")}
         record["channels"] = {name: found for name, found in channels.items() if found}
-        # glTF hangs coverage on the base color texture, so a material that binds only a
-        # mask has nowhere to put it. The mask becomes its color as well, which is what the
-        # eleven Military chain-link fences built this way were always going to look like.
+        # glTF hangs coverage on the base color texture, so a material binding only a mask
+        # has nowhere else to put it and the mask becomes its color too.
         if record["channels"].get("alpha") and not record["channels"].get("albedo"):
             record["channels"]["albedo"] = record["channels"]["alpha"]
-        # Last, so a texture the FBX actually named always wins over a declared default,
-        # and so a mask promoted to color above is not overwritten by one.
+        # After the above, so a texture the FBX named beats a declared default and a mask
+        # promoted to color is not overwritten by one.
         if not (record["channels"].get("albedo") or {}).get("texture_source"):
             filled = flavor_fill(context, source, info["source"], warnings)
             if filled:
                 record["channels"]["albedo"] = filled
                 if filled["cutout"]:
-                    # A Synty foliage card is its own coverage: the quad draws one leaf
-                    # across the whole of UV space and everything around it is meant to be
-                    # cut away. Binding the color alone ships the leaf as a solid
-                    # rectangle, so the same image has to serve as the mask.
+                    # A foliage card is its own coverage: the quad draws one leaf across
+                    # the whole of UV space and everything around it is cut away, so the
+                    # same image has to serve as the mask or the leaf ships as a rectangle.
                     record["channels"]["alpha"] = filled
-        # A companion belongs to the atlas rather than to the material, so it is keyed on
-        # whatever the albedo settled on. Last again, and only into an empty channel, so a
-        # map the FBX named itself always wins over a declared one.
+        # A companion belongs to the atlas rather than the material, so it is keyed on
+        # whatever the albedo settled on, and only fills a channel nothing else did.
         member = (record["channels"].get("albedo") or {}).get("member")
         if member:
             for channel in material_flavors.COMPANION_CHANNELS:
@@ -665,17 +650,16 @@ def material_indices(mesh):
 def rebuild_materials(context, source, warnings):
     """Replace every imported material with a canonically named, deduplicated one.
 
-    Returns a ``(materials, fills)`` tuple: one record per distinct material for the CLI to
-    turn into a Godot manifest, and the flavor fills this model took, read before
-    distinct_materials below deduplicates canonical names and can carry one away silently.
+    Returns ``(materials, fills)``: one record per distinct material for the CLI to turn
+    into a Godot manifest, and the flavor fills this model took, read before
+    distinct_materials deduplicates canonical names and can carry one away silently.
     """
     resolved = resolve_materials(context, source, warnings)
     fills = material_flavors.flavor_fills(resolved)
     # Capture slot assignments, then rebuild from scratch so names cannot collide. Emptying
-    # a mesh's slots also resets every polygon's material_index to zero, so the per-face
+    # a mesh's slots resets every polygon's material_index to zero, so the per-face
     # assignment has to be carried across by hand; without it a multi-material mesh
-    # collapses onto whatever sits in its first slot, which is how a castle wall ends up
-    # wearing the pack's atlas stretched over it instead of its own tiling brick texture.
+    # collapses onto whatever sits in its first slot.
     plan = [(mesh,
              [resolved.get(m.name, {}).get("name") if m else None for m in mesh.materials],
              material_indices(mesh))
@@ -772,11 +756,9 @@ def lod_chains():
 def drop_extra_lods():
     """Keep the finest level of every LOD chain and delete the rest.
 
-    Nothing downstream reads these as a chain. Godot has no LOD group, takes no meaning from
-    the naming and does not implement ``MSFT_lod``, so all four levels arrive as ordinary
-    sibling meshes and render at once, the coarsest being a billboard imposter crossing the
-    very tree it exists to stand in for at distance. Godot generates its own chain from
-    whatever it imports, which makes the finest level the only one worth shipping.
+    Godot has no LOD group, takes no meaning from the naming and does not implement
+    ``MSFT_lod``, so every level arrives as an ordinary sibling mesh and they all render at
+    once. It generates its own chain from whatever it imports instead.
     """
     dropped = 0
     for members in lod_chains().values():
@@ -794,16 +776,14 @@ def drop_extra_lods():
 def island_triangles(mesh):
     """Triangle count of the connected island each polygon belongs to.
 
-    Coincident vertices are welded first. Nothing here has been through glTF yet, but Maya
-    leaves a trunk built from separately modeled sections meeting at unmerged vertices,
-    which would otherwise read as dozens of islands instead of one.
+    Coincident vertices are welded first: Maya leaves a trunk built from separately modeled
+    sections meeting at unmerged vertices, which would read as dozens of islands, not one.
     """
     working = bmesh.new()
     working.from_mesh(mesh)
     working.faces.ensure_lookup_table()
-    # Welding can drop a face that collapses, which would renumber everything after it.
-    # Carrying each face's own index through the op keeps the answer keyed to the mesh
-    # this was asked about rather than to whatever bmesh is left holding.
+    # Welding can drop a collapsed face and renumber everything after it, so each face
+    # carries its own index through the op and the answer stays keyed to the input mesh.
     origin = working.faces.layers.int.new("origin")
     for face in working.faces:
         face[origin] = face.index
@@ -854,17 +834,15 @@ def foliage_texture(suffix, context, warnings):
 def foliage_material(name, path, cutout):
     """Stand in for the texture binding the FBX was exported without.
 
-    Built as an imported material would have arrived rather than as a finished one, so that
-    everything downstream, resolution and naming and the manifest, treats it as a material
-    that named a file all along.
+    Built as an imported material would have arrived rather than as a finished one, so
+    resolution, naming and the manifest all treat it as one that named a file all along.
     """
     material = bpy.data.materials.new(name)
     material.use_nodes = True
     bsdf = material.node_tree.nodes["Principled BSDF"]
-    # Blender's own defaults for a new node are not the importer's: it starts a material at
-    # roughness 0.5 and emission white, which would qualify every one of these names with an
-    # R50 and an EmissiveFFFFFF and light them up in the generated .tres. What the FBX would
-    # have declared is a plain material, so say that.
+    # Blender's defaults for a new node are not the importer's: roughness 0.5 and emission
+    # white would qualify every one of these names with an R50 and an EmissiveFFFFFF, and
+    # light them up in the generated .tres. A plain material is what the FBX would have said.
     bsdf.inputs["Roughness"].default_value = material_names.DEFAULT_ROUGHNESS
     bsdf.inputs["Metallic"].default_value = 0.0
     if "Emission Color" in bsdf.inputs:
@@ -883,11 +861,9 @@ def apply_foliage_textures(context, source, warnings):
     """Bind the textures a foliage model's FBX declares nothing for, splitting where needed.
 
     Synty's Nature Biomes foliage exports with its material bindings stripped: one gray
-    Lambert covers trunk and canopy alike, and since every leaf card maps the whole of UV
-    space, the trunk's own UVs sit underneath them and no single image can serve both. The
-    parts are separable by geometry though. A leaf card is one quad; a trunk is a single
-    island of hundreds of triangles, so splitting on island size recovers the two materials
-    the model was authored with. See ``foliage_overrides.json`` for what each model gets.
+    Lambert covers trunk and canopy alike, and no single image can serve both, since every
+    leaf card maps the whole of UV space with the trunk's own UVs underneath. Island size
+    separates them. See ``foliage_overrides.json`` for what each model gets.
     """
     parts = foliage_parts(context, source)
     if not parts:
@@ -915,8 +891,8 @@ def apply_foliage_textures(context, source, warnings):
             for index in woody:
                 obj.data.polygons[index].material_index = 1
         touched += 1
-    # The Lambert that carried no texture is what these replaced, so leaving it behind would
-    # put a material no mesh wears into the manifest, still reported as unresolved.
+    # Leaving the Lambert these replaced behind would put a material no mesh wears into the
+    # manifest, still reported as unresolved.
     for material in list(bpy.data.materials):
         if material.users == 0:
             bpy.data.materials.remove(material)
@@ -940,11 +916,9 @@ def real_meshes():
 def binds_a_texture():
     """True when some mesh in the scene wears a material that bound an image.
 
-    What ``--untextured drop`` and ``--untextured fill-or-drop`` ask. Read off the
-    rebuilt materials the meshes actually wear rather than off the resolution records,
-    so a material that resolved but that no mesh ended up wearing cannot vouch for a
-    model that still ships white. Any channel counts: a model carrying only an
-    emission or normal map has real texture data on it.
+    What ``--untextured drop`` asks. Read off the rebuilt materials the meshes actually
+    wear rather than off the resolution records, so a material nothing ended up wearing
+    cannot vouch for a model that still ships white. Any channel counts.
     """
     for obj in real_meshes():
         for material in obj.data.materials:
@@ -958,10 +932,9 @@ def binds_a_texture():
 def world_coordinates(obj):
     """Every vertex of ``obj`` in world space.
 
-    Computed from vertex data rather than ``Object.bound_box``, which is a cache that
-    transform_apply does not refresh. Taking the corners of a local bounding box would
-    also be wrong here: the box of a rotated mesh is not the rotation of its box, so
-    baking a non-axis-aligned rotation would look like geometry had moved.
+    From vertex data rather than ``Object.bound_box``, which is a cache transform_apply
+    does not refresh. Local bounding box corners would be wrong too: the box of a rotated
+    mesh is not the rotation of its box, so baking a rotation would look like drift.
     """
     mesh = obj.data
     flat = numpy.empty(len(mesh.vertices) * 3, dtype=numpy.float64)
@@ -1001,8 +974,8 @@ def bounds_drift(before, after):
     return max(abs(a - b) for a, b in zip(before, after))
 
 
-# Every FBX property type character, and the encode_bin call that writes one. The parser
-# assigns these; this is the only place that knows how each reaches the file.
+# Every FBX property type character, and the encode_bin call that writes one. fbx_ascii
+# assigns the characters; this is the only place that knows how each reaches the file.
 FBX_WRITERS = {
     "I": "add_int32", "L": "add_int64", "Y": "add_int16", "D": "add_float64",
     "F": "add_float32", "S": "add_string_unicode", "R": "add_bytes", "C": "add_char",
@@ -1039,10 +1012,10 @@ def write_binary_fbx(text, path):
 def import_model(src, import_options):
     """Import an FBX, transcoding it from ASCII to binary first when that is what it is.
 
-    Blender's importer reads binary only. The two serializations hold the same tree, so a
-    file in the wrong one is repaired rather than failed: see fbx_ascii.py and docs/DESIGN.md.
-    The check afterwards is what makes the repair trustworthy, since a mistyped array reaches
-    Blender as geometry rather than as an error.
+    Blender's importer reads binary only, and the two serializations hold the same tree, so
+    a file in the wrong one is repaired rather than failed. The check afterwards is what
+    makes the repair trustworthy: a mistyped array reaches Blender as geometry, not as an
+    error. See fbx_ascii.py and docs/DESIGN.md.
     """
     with open(src, "rb") as stream:
         if fbx_ascii.is_binary(stream.read(len(fbx_ascii.BINARY_MAGIC))):
@@ -1059,9 +1032,9 @@ def import_model(src, import_options):
     finally:
         os.unlink(repaired)
 
-    # Counted before anything drops a mesh, and summed over the scene rather than matched per
-    # mesh, which needs no name correspondence. No import option splits or merges vertices, so
-    # these are equalities rather than bounds.
+    # Counted before anything drops a mesh, and summed over the scene rather than matched
+    # per mesh, which needs no name correspondence. No import option splits or merges
+    # vertices, so these are equalities rather than bounds.
     actual = {
         "vertices": sum(len(mesh.vertices) for mesh in bpy.data.meshes),
         "loops": sum(len(mesh.loops) for mesh in bpy.data.meshes),
@@ -1090,21 +1063,17 @@ def convert(job, options, packs):
     mode = options.get("untextured", "fill")
     context = packs.get(job.get("pack"), {})
     if mode in ("keep", "drop"):
-        # Filling is off, so the worker must not see a flavor binding table it would act on.
-        # --untextured keep --scan-materials is therefore how you see what is still bare.
-        # A companion or sibling never fills a bare material; it only adds an emission or
-        # normal channel to a material that already resolved an atlas, so --untextured has
-        # no business governing it. It is left in place, which means it reaches strictly
-        # fewer materials under keep than under fill, since there are no flavor-filled
-        # albedos left for it to key off. That is correct, not a shortfall.
+        # Filling is off, so the worker must not see a binding table it would act on, which
+        # is what makes --untextured keep --scan-materials show every material as bare as
+        # its FBX left it. Companions stay: they only add a channel to a material that
+        # already resolved an atlas, so they can never turn a bare material into a filled one.
         materials = context.get("materials", {})
         context = dict(context)
         context["materials"] = {key: value for key, value in materials.items() if key != "bind"}
 
     if options.get("scan_only"):
-        # Report what the materials resolve to without writing output. Foliage bindings are
-        # applied first even though nothing is written, or the scan would report a tree as
-        # untextured that a conversion of the same pack textures perfectly well.
+        # Foliage bindings are applied even though nothing is written, or the scan would
+        # report a tree as untextured that a real conversion textures perfectly well.
         apply_foliage_textures(context, src, warnings)
         resolved = resolve_materials(context, src, warnings)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "src_bytes": os.path.getsize(src),
@@ -1126,12 +1095,11 @@ def convert(job, options, packs):
     if not external:
         strip_materials()
 
-    # Ahead of the remaining work, all of which would be spent on a file about to be thrown
-    # away. Geometry is the qualifier: an animation file carries a skeleton and no mesh, so
-    # it has nothing to texture and is not what this is meant to catch.
+    # Ahead of the remaining work, which would be spent on a file about to be thrown away.
+    # Geometry is the qualifier: an animation file carries a skeleton and no mesh, so it has
+    # nothing to texture and is not what this is meant to catch.
     if mode in ("drop", "fill-or-drop") and real_meshes() and not binds_a_texture():
-        # A previous run without the flag would have left one here, and leaving it would
-        # put back exactly the model this was asked to keep out.
+        # An earlier run without the flag would have left one here.
         if os.path.exists(dst):
             os.remove(dst)
         return {"src": src, "dst": dst, "pack": job.get("pack"), "untextured": True,
@@ -1158,8 +1126,7 @@ def convert(job, options, packs):
         export_options["export_image_format"] = "AUTO"
         export_options["export_keep_originals"] = True
         # A normal map is meaningless without a tangent basis. glTF lets a loader generate
-        # one, but shipping it keeps the handful of models that carry normals right in any
-        # engine, and costs nothing on the thousands that do not.
+        # one, but shipping it keeps the few models that carry normals right in any engine.
         if any("normal" in record["channels"] for record in materials):
             export_options["export_tangents"] = True
     bpy.ops.export_scene.gltf(filepath=dst, **export_options)
@@ -1224,8 +1191,8 @@ def main():
             result = convert(job, options, packs)
             result["ok"] = True
         except Exception:
-            # The pack travels with the failure too: a basename alone does not identify a
-            # model, since packs share filenames like SM_Prop_Barrel_01.fbx between them.
+            # The pack travels with the failure: packs share filenames like
+            # SM_Prop_Barrel_01.fbx, so a basename alone does not identify a model.
             result = {"src": job["src"], "dst": job["dst"], "pack": job["pack"], "ok": False,
                       "error": traceback.format_exc(limit=3)}
         result["seconds"] = round(time.monotonic() - started, 3)

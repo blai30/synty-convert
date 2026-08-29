@@ -1,5 +1,5 @@
 {
-  "_comment": "Manual texture mappings for references the matcher cannot resolve lexically. Keyed by pack folder name, then by the texture stem the FBX asks for. Values are path suffixes matched against the pack's shipped textures. Write a value as 'OtherPack::path/suffix.png' when the texture a pack asks for is one another pack ships, which is how Synty's biome packs reference the base Nature atlas; that other pack then has to be converted too. Keys starting with _ are ignored. Run --scan-materials to see what is still unresolved in your own packs.",
+  "_comment": "Manual texture mappings for references the matcher cannot resolve. Keyed by pack folder name, then by the texture stem the FBX asks for; values are path suffixes matched against the pack's shipped textures. Write a value as 'OtherPack::path/suffix.png' when the texture a pack asks for is one another pack ships, which is how the biome packs reference the base Nature atlas; that pack then has to be converted too. Keys starting with _ are ignored. See docs/materials.md.",
   "POLYGON_BattleRoyale_Source_Files_v4": {
     "Air_Vehicle_Master_01": "PolygonBattleRoyale_Plane_01.png",
     "Air_Vehicle_Damaged_01": "PolygonBattleRoyale_Plane_01_Damaged.png",

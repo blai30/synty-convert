@@ -5,9 +5,9 @@
 ##     godot --headless --import
 ##     godot --headless --script res://tools/verify_import.gd -- --assets res://assets
 ##
-## Walks every imported model and asserts the things the converter promises: identity
-## node transforms, real world scale, a material on every surface, and textures that
-## resolve to the shared atlas rather than an embedded copy.
+## Walks every imported model and asserts what the converter promises: identity node
+## transforms, real world scale, a material on every surface, and textures that resolve to
+## the shared atlas rather than an embedded copy.
 extends SceneTree
 
 const DEFAULT_ASSETS := "res://assets"

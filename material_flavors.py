@@ -1,24 +1,20 @@
-"""Curated material knowledge the FBX does not carry.
+"""Curated material knowledge the FBX does not carry, read out of material_overrides.json.
 
-Two kinds live here. Interchangeable texture sets are the textures a pack ships as
-alternatives for one surface, five tileable walls or three recolors of one atlas, whose
-choice belongs to the consumer; the FBX names a placeholder that never shipped, or names
-nothing at all, so ``texture_matching`` has nothing to decode and the material arrives
-color only. Companion maps are the emissive and normal textures a pack ships for an atlas
-that no FBX references at all, because that wiring lived in Unity materials which are not
-part of the source packs.
+Two kinds live here.
 
-This module holds the curated answer to both: which shipped textures form a set, which
-member a bare material falls back to, which materials each set applies to, and which
-emissive or normal map belongs with which atlas. Bindings are keyed on the FBX's own
-material name, because a material whose bitmap path was emptied before export has no texture
-stem to key on. Companions are keyed on the atlas instead, because one emissive serves every
-material wearing it. Listing a set's other members is that same knowledge read the other way,
-and is what lets a converted model arrive with every alternative already available to swap to.
+**Flavor sets** are the textures a pack ships as alternatives for one surface: five tileable
+walls, or three recolors of one atlas. The choice belongs to the consumer, so the FBX names
+a placeholder that never shipped or nothing at all, and the material arrives color only. A
+set says which shipped textures are interchangeable, which one a bare material falls back
+to, and which materials the set applies to. Bindings key on the FBX's own material name,
+because a material whose bitmap path was emptied before export has no texture stem to key on.
 
-Paths here are pack-relative POSIX strings. They cross into the Blender worker through a
-JSON job file, where an absolute path would be meaningless: the worker joins them onto the
-source root to read a texture and onto the output root to point a material at one.
+**Companion maps** are the emissive and normal textures a pack ships for an atlas that no
+FBX references, because that wiring lived in Unity materials the source drop omits. These
+key on the atlas, since one emissive serves every material wearing it.
+
+Paths here are pack-relative POSIX strings, because they cross into the Blender worker
+through a JSON job file where an absolute path would be meaningless.
 
 Pure Python: this module is imported both by the Blender worker and by the CLI.
 """
@@ -48,14 +44,12 @@ def expand_sets(config, textures, source_root, warnings):
     """Resolve every set's member globs against the textures a pack actually ships.
 
     A set whose default is not among its own members is dropped rather than guessed at: the
-    default is the one member that gets applied without anybody asking for it, so a typo
-    there would put an unintended texture on every model the set binds.
+    default is applied without anybody asking for it by name, so a typo there would put an
+    unintended texture on every model the set binds.
 
-    A set may also declare ``cutout``, which says its default is an alpha card rather than
-    an opaque surface: a Synty foliage or netting quad has no coverage of its own to cut
-    with until the same image is bound as both color and mask. The flag is carried through
-    unchanged, defaulting to false when a set does not declare it, so a caller filling a bare
-    material can tell the two cases apart.
+    ``cutout`` says a set's members are alpha cards rather than opaque surfaces. Such a card
+    has no coverage of its own until the same image is bound as both color and mask, so the
+    flag is carried through for the caller that fills a bare material.
     """
     relatives = sorted(relative(path, source_root) for path in textures)
     sets = {}
@@ -100,16 +94,13 @@ COMPANION_CHANNELS = ("emission", "normal")
 def expand_companions(config, textures, source_root, warnings):
     """Resolve every declared companion map against the textures a pack actually ships.
 
-    The two sides are deliberately asymmetric. A key may match many albedos, because one
-    emissive commonly serves a whole set of recolors and writing an identical entry per
-    member would only invite them to drift apart. A value must match exactly one texture,
-    because a channel binds one file and there is no defensible way to choose among several;
-    an ambiguous value is dropped rather than guessed at, the same rule expand_sets follows
-    for a default that is not among its own members.
+    The two sides are deliberately asymmetric. A key may match many albedos, since one
+    emissive commonly serves a whole set of recolors. A value must match exactly one
+    texture, since a channel binds one file and there is no defensible way to choose among
+    several; an ambiguous value is dropped rather than guessed at.
 
-    Keys are tried in the order they are written and the first to claim an albedo on a given
-    channel keeps it, so an overlap is reported rather than silently resolved by whichever
-    pattern happens to sort first.
+    Keys are tried in written order and the first to claim an albedo on a channel keeps it,
+    so an overlap is reported rather than resolved by whichever pattern sorted first.
     """
     relatives = sorted(relative(path, source_root) for path in textures)
     companions = {}
@@ -170,10 +161,9 @@ def normalize_bindings(config, sets, warnings):
 def match_binding(bindings, model_stem, material_name):
     """The first binding covering this material on this model, or None.
 
-    Returns the whole binding rather than the flavor name so the caller can report which
-    rule fired, which is what tells a stale table from a working one. Patterns anchor at
-    the start here, unlike matches_suffix, because a material name and a filename stem are
-    whole names rather than the tail of a path.
+    Returns the whole binding rather than the flavor name, so the caller can report which
+    rule fired and tell a stale table from a working one. Patterns anchor at the start
+    here, unlike matches_suffix: a material name is a whole name, not the tail of a path.
     """
     for binding in bindings:
         if (fnmatch.fnmatchcase(model_stem.lower(), binding["model"].lower())
@@ -185,11 +175,9 @@ def match_binding(bindings, model_stem, material_name):
 def flavor_fills(resolved):
     """Every flavor fill one model took, read before canonical names are deduplicated.
 
-    The worker's ``distinct_materials`` collapses two materials that settled on the same
-    canonical name, and when one of them was filled while the other resolved from its own
-    reference, whichever Blender listed first wins and the loser's fill marker goes with it.
-    Reading fills off the pre-dedup records keeps a fill visible even where the material it
-    produced merges into a twin that never needed filling.
+    ``distinct_materials`` collapses two materials that settled on the same canonical name,
+    and if one was filled while the other resolved on its own, the fill marker can go with
+    the loser. Reading fills off the pre-dedup records keeps them visible.
     """
     fills = {}
     for entry in resolved.values():
@@ -206,10 +194,9 @@ def flavor_fills(resolved):
 def variants_of(member, sets):
     """The rest of the set this texture belongs to, or nothing when it belongs to none.
 
-    Sets are checked in name order and the first hit wins, which only matters when two of
-    them overlap, and expand_sets has already warned about that. Members arrive already
-    sorted from expand_sets, and this preserves that order rather than sorting again, so a
-    hand-built sets dict would come back in whatever order it was written.
+    Sets are checked in name order and the first hit wins, which only matters when two
+    overlap, and expand_sets has already warned about that. Member order is preserved as
+    expand_sets produced it.
     """
     for name in sorted(sets):
         members = sets[name]["members"]

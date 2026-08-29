@@ -2,12 +2,14 @@
 
 Blender's importer reads binary FBX only, and Synty ships a handful of models in the ASCII
 variant by mistake. The two are the same tree of named nodes carrying the same typed
-properties, so a model in the wrong serialization is recoverable without touching the model:
-parse the text here, then write the tree back out as binary with Blender's own encode_bin
-and hand that to the importer. See docs/DESIGN.md.
+properties, so nothing about the model has to change: parse the text here, then write the
+tree back out as binary with Blender's own encode_bin. See docs/DESIGN.md.
+
+What ASCII drops is the type tag on every property, so this module assigns them, and that
+assignment is the whole risk of the feature. Every rule for it is below.
 
 Pure Python by design. The Blender worker imports this module, but it must never import bpy,
-so that every typing rule below is covered by the test suite under plain CPython.
+so that every typing rule stays covered by the test suite under plain CPython.
 """
 
 from __future__ import annotations
@@ -25,10 +27,9 @@ BINARY_MAGIC = b"Kaydara FBX Binary"
 INT32_RANGE = range(-2 ** 31, 2 ** 31)
 
 # An array's element type, which the text never states. Inferring it from the values is not
-# safe: a float array whose values are all whole numbers reads exactly like an integer one,
-# and Vertices read as int32 is geometry that is garbage rather than an error. So the type
-# comes from the key, and a key that is not here fails the file rather than being guessed at.
-# These sixteen are every array key in the ASCII models Synty shipped.
+# safe: a float array of whole numbers reads exactly like an integer one, and Vertices read
+# as int32 is garbage geometry rather than an error. So the type comes from the key, and a
+# key that is not here fails the file. These sixteen are every key the ASCII models use.
 ARRAY_TYPES = {
     "Vertices": "d", "Normals": "d", "NormalsW": "d", "UV": "d", "Colors": "d",
     "Weights": "d", "Matrix": "d", "Transform": "d", "TransformLink": "d",
@@ -36,12 +37,10 @@ ARRAY_TYPES = {
     "Smoothing": "i", "ColorIndex": "i", "Indexes": "i",
 }
 
-# The element type a Properties70 row gives its values, measured off 179 binary FBX in the
-# three packs that ship ASCII rather than assumed. A row carries this character once per
-# value and states its own count, so "Short" appears as both Y and YYY. A type not listed
-# falls back to reading the syntax, which is safe in a way that guessing an array is not:
-# these are scalars, and the only reader downstream is Blender's importer, which holds them
-# as ordinary Python numbers.
+# The element type a Properties70 row gives its values, measured off 179 binary FBX rather
+# than assumed. A type not listed falls back to reading the syntax, which is safe in a way
+# that guessing an array is not: these are scalars, and Blender's importer holds them as
+# ordinary Python numbers either way.
 PROPERTY_TYPES = {
     "Bool": "I", "bool": "I", "int": "I", "Integer": "I", "enum": "I",
     "Visibility Inheritance": "I", "Short": "Y", "KTime": "L", "ULongLong": "L",
@@ -56,28 +55,24 @@ PROPERTY_TYPES = {
 # whatever comes after by syntax.
 NO_VALUE_TYPES = frozenset({"Compound", "object"})
 
-# A handful of leaves outside Properties70, such as a Model's "Shading" flag, carry a bare
-# unquoted letter instead of a number or a string. No other legal ASCII token is a single
-# letter, so this is not read from context: it is the FBX SDK's one-byte char property,
-# which different exporter versions write as either letter pair for the same true or false
-# meaning. Binary FBX carries the same value as a one byte "C" property holding the letter
-# itself, so the letter is carried through as a byte rather than translated into a bool.
+# A few leaves outside Properties70, such as a Model's "Shading" flag, carry a bare unquoted
+# letter. This is the FBX SDK's one-byte char property, which different exporter versions
+# write as either letter pair for the same true or false meaning. Binary carries it as a one
+# byte "C" property holding the letter, so the letter goes through as a byte, not a bool.
 CHAR_LETTERS = frozenset({"Y", "T", "N", "F"})
 
 # The top level nodes a binary FBX carries and the ASCII form omits. encode_bin's
-# _write_timedate_hack overwrites the first two with its own constants and asserts these exact
-# types on the way, printing "Missing fields!" when they are absent. Synthesizing them means
-# the output is a conventional binary FBX rather than one missing a header every other FBX has.
+# _write_timedate_hack overwrites the first two with its own constants and asserts these
+# exact types on the way, printing "Missing fields!" when they are absent.
 HEADER_NODES = (
     ("FileId", b"", "R"),
     ("CreationTime", "1970-01-01 10:00:00:000", "S"),
     ("Creator", "synty_convert, transcoded from ASCII FBX", "S"),
 )
 
-# Array values wrap across lines at about 2048 characters, 5535 times over the ASCII models
-# Synty shipped, so each array is folded onto its opening line before anything else reads the
-# text. An array body holds numbers, commas and whitespace only, so matching to the next brace
-# cannot run past the end of one.
+# Array values wrap across lines at about 2048 characters, so each array is folded onto its
+# opening line before anything else reads the text. An array body holds numbers, commas and
+# whitespace only, so matching to the next brace cannot run past the end of one.
 ARRAY_BLOCK = re.compile(r"\*(\d+)\s*\{\s*(?:a:)?([^}]*)\}")
 
 ARRAY_NODE = re.compile(r"^([A-Za-z0-9_]+):\s*\*(\d+)\s*\{a:(.*)\}$")
@@ -127,8 +122,8 @@ def parse(text: str) -> tuple[list[Element], int]:
 def geometry_counts(elements: list[Element]) -> dict[str, int]:
     """What the text declares its meshes hold, for checking an import against.
 
-    A transcode that mistyped an array reaches Blender as geometry rather than as an error,
-    so the counts the source states are the only independent account of what should arrive.
+    A mistyped array reaches Blender as geometry rather than as an error, so the counts the
+    source states are the only independent account of what should have arrived.
     """
     counts = {"vertices": 0, "loops": 0, "uv_layers": 0}
     for objects in (element for element in elements if element.id == "Objects"):
@@ -272,11 +267,10 @@ def _unescape(text):
     return text.replace("&quot;", '"')
 
 
-# Where a node stores an object's name and its class together. Binary writes the name, the
-# separator and then the class; ASCII writes the class, "::" and then the name, so the two
-# halves are reversed. Blender's own json2fbx converts these with a blanket textual replace,
-# which keeps the ASCII order and so names every object after its class and classes every
-# object after its name, silently. The slots below were read off a real binary Synty FBX.
+# Where a node stores an object's name and class together. Binary writes name, separator,
+# class; ASCII writes class, "::", name, so the two halves are reversed. Blender's own
+# json2fbx converts these with a blanket textual replace, which keeps the ASCII order and so
+# names every object after its class, silently. These slots were read off a real binary FBX.
 def _name_slot(parent, element):
     """The index of the property carrying a name and class pair, or None."""
     if parent == "Objects":
@@ -296,11 +290,11 @@ def _name_first(text):
     return name + "\x00\x01" + class_name
 
 
-# Where a node stores a 64 bit object id, regardless of how small the number is. Binary's
-# importer gates on the type character rather than the value: elem_uuid asserts int64, an
-# object node's own id must read "LSS", and a connection is skipped, silently, unless both
-# endpoints read "L". A scene root connection names id 0, which fits int32, so typing by
-# magnitude alone reads the wrong character for it. Measured off 199 binary FBX in four packs.
+# Where a node stores a 64 bit object id, however small the number is. The importer gates on
+# the type character, not the value: elem_uuid asserts int64, an object node's own id must
+# read "LSS", and a connection is skipped silently unless both endpoints read "L". A scene
+# root connection names id 0, which fits int32, so typing by magnitude drops that connection
+# and the file imports as an empty scene. Measured off 199 binary FBX in four packs.
 def _id_slots(parent, element):
     """The property slots this node carries as a 64 bit object id, or ()."""
     if parent == "Objects":
@@ -318,9 +312,9 @@ def _id_slots(parent, element):
     return ()
 
 
-# Where a node stores a float64 written as a whole number, which magnitude typing would
-# otherwise read as an integer. Nothing in the importer reads these three today, but the
-# tree should be the tree the binary reader produces. Measured off the same 199 files.
+# Where a node stores a float64 written as a whole number, which reading the syntax alone
+# would take for an integer. Nothing in the importer reads these three today, but the tree
+# should be the tree the binary reader produces. Measured off the same 199 files.
 def _float_slots(parent, element):
     """The property slots this node carries as a float64, or ()."""
     if parent == "Texture" and element.id in ("ModelUVScaling", "ModelUVTranslation"):

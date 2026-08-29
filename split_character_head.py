@@ -1,22 +1,18 @@
 """Split a Synty character's head off its body, executed inside Blender.
 
-Imported by ``blender_convert.py`` and applied between import and export, so both halves
-flow through the same normalization, material and export path as any other mesh and land
-in a single GLB as two sibling nodes under one skeleton.
+Applied between import and export, so both halves flow through the same normalization,
+material and export path as any other mesh and land in one GLB as two sibling nodes under
+one skeleton.
 
 A Synty body is one contiguous mesh with one material, so the head cannot be found by
-material or by loose part. Selection is by vertex weight instead: a vertex moves to the
-head when the head bone *and everything parented under it* holds most of its weight. The
-descendants are what matters in practice. Eyes and eyebrows hang off the head as their
-own bones and carry the eye geometry's weights, so selecting on the head bone alone
-leaves eyeballs floating where the head used to be.
+material or by loose part. Selection is by vertex weight: a vertex moves to the head when
+the head bone *and everything parented under it* holds most of its weight. The descendants
+matter, since eyes and eyebrows hang off the head as their own bones.
 
 Faces spanning the boundary stay with the body, so the seam vertices exist in both halves
-at the same positions with the same weights and the neck cannot crack under a pose. That
-leaves the body open at the neck: invisible while the head is shown, a hole straight
-through the torso once it is hidden. So the body is capped and the head is not. The
-head's opening sits inside the body's cap, and capping both would put two coincident
-faces in one place to z-fight.
+at matching positions and weights and the neck cannot crack under a pose. That leaves the
+body open at the neck, so it is capped; the head is not, because its opening sits inside
+the body's cap and capping both would leave two coincident faces to z-fight.
 """
 
 from __future__ import annotations
@@ -35,9 +31,9 @@ COORDINATE_PRECISION = 5
 def find_head_bone(armature):
     """The head bone, matched case-insensitively.
 
-    Synty ships two rig families and they disagree on capitalization: the older packs name
-    it ``Head``, the newer UE-style ones ``head``. An exact match also keeps this off
-    ``headAttach``, which is a child and arrives through the closure below anyway.
+    Synty's two rig families disagree on capitalization: older packs name it ``Head``,
+    newer UE-style ones ``head``. Matching the whole name keeps this off ``headAttach``,
+    which is a child and arrives through the descendant closure anyway.
     """
     for bone in armature.data.bones:
         if bone.name.lower() == HEAD_BONE:
@@ -83,9 +79,8 @@ def edge_key(edge):
 def seam_edges(edit):
     """Coordinate keys for the edges where a head face meets a body face.
 
-    This is the ring the separate is about to open up, recorded before it happens so the
-    cap can target exactly it and leave vendor-authored openings alone. Synty eye sockets
-    are open cups, and filling those would put a lid over both eyes.
+    The ring the separate is about to open, recorded beforehand so the cap targets exactly
+    it. Synty eye sockets are open cups, and filling those would put a lid over both eyes.
     """
     keys = set()
     for edge in edit.edges:
@@ -142,15 +137,13 @@ def ordered_ring(edges):
 def fan_fill(mesh, edges, ring, deform, uv_layer):
     """Close one ring with a triangle fan around a new center vertex.
 
-    Spanning the ring with a single face instead, which is what ``holes_fill`` and the
-    glTF exporter both reach for, means choosing diagonals between vertices already on the
-    rim. A Synty neck is pinched enough that one of those diagonals is an edge the body
-    already has, and reusing it lands a third face on that edge. Every edge a fan adds
-    ends at the new center vertex, so it cannot collide with anything already there, and
-    the ring is closed by construction rather than by whatever a fill heuristic manages.
+    Spanning the ring with a single face, which is what ``holes_fill`` reaches for, means
+    choosing diagonals between vertices already on the rim, and a Synty neck is pinched
+    enough that one of those is an edge the body already has. Every edge a fan adds ends at
+    the new center vertex, so it cannot collide with anything already there.
 
-    The center vertex takes the ring's mean weights, so the cap deforms with the neck
-    instead of hanging in place when the character moves.
+    The center takes the ring's mean weights, so the cap deforms with the neck instead of
+    hanging in place when the character moves.
     """
     center = mesh.verts.new(sum((vertex.co for vertex in ring), Vector()) / len(ring))
     weights = collections.defaultdict(float)
@@ -190,11 +183,9 @@ def cap(obj, seam, warnings):
     Returns the face count and how many rings could not be closed.
 
     Whole boundary loops are closed, chosen by containing at least one seam edge, rather
-    than the seam edges alone. A neck ring is not always made only of edges the separate
-    created: where the vendor mesh was already open near the collar, the ring comes out
-    part new and part pre-existing, and treating only the new part as the hole leaves an
-    unclosed arc. Requiring a seam edge is what leaves vendor openings elsewhere alone, so
-    the eye cups keep their opening rather than getting a lid.
+    than the seam edges alone: where the vendor mesh was already open near the collar the
+    ring comes out part new and part pre-existing. Requiring a seam edge is what leaves
+    vendor openings elsewhere alone, so the eye cups keep their opening.
     """
     mesh = bmesh.new()
     mesh.from_mesh(obj.data)
@@ -208,10 +199,9 @@ def cap(obj, seam, warnings):
     for loop in opened:
         ring = ordered_ring(loop)
         if ring is None:
-            # Branching boundary, which means the vendor mesh was already non-manifold
-            # around the neck. A partly closed neck shows through the torso and nobody
-            # sees it until a head is hidden in game, so it gets counted and reported
-            # rather than passing for a cap.
+            # Branching boundary: the vendor mesh was already non-manifold at the neck. A
+            # partly closed neck shows through the torso and nobody sees it until a head is
+            # hidden in game, so it is counted and reported rather than passing for a cap.
             unclosed += 1
             warnings.append(f"'{obj.name}' neck opening is not a simple ring; left open")
             continue
@@ -229,9 +219,8 @@ def separate_head(obj, indices, warnings):
     """Move the head faces into an object of their own and return it, or None.
 
     Selection goes through bmesh in edit mode rather than ``mesh.vertices[i].select`` in
-    object mode. The object mode flags do not survive the mode switch: the mesh arrives
-    from the importer fully selected, so separating on those moves every face into the new
-    object and leaves the original empty, which looks like a split and is not one.
+    object mode: those flags do not survive the mode switch, and the mesh arrives from the
+    importer fully selected, so separating on them moves every face into the new object.
     """
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
@@ -247,10 +236,9 @@ def separate_head(obj, indices, warnings):
     for vertex in edit.verts:
         vertex.select_set(head_fraction(vertex, deform, indices) >= HEAD_WEIGHT)
 
-    # Counted in faces, not vertices, because faces are what separate actually moves.
-    # A modular body that already ships headless still carries a stray head-weighted
-    # vertex or two, and separating on those alone yields an object with no faces: the
-    # exporter drops it, and the body is left renamed for a split that never happened.
+    # Counted in faces, not vertices, since faces are what separate moves. A modular body
+    # that already ships headless carries a stray head-weighted vertex or two, and
+    # separating on those yields an object with no faces that the exporter then drops.
     faces = sum(1 for face in edit.faces if all(vertex.select for vertex in face.verts))
     if not faces or faces == len(edit.faces):
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -275,9 +263,9 @@ def separate_head(obj, indices, warnings):
 def split_scene(warnings):
     """Split every skinned mesh in the scene that has a head, and describe what happened.
 
-    Returns one record per mesh split, and an empty list for the overwhelming majority of
-    files that are props rather than characters. Detection is by content, not filename: a
-    single armature carrying a head bone is what makes a file a character here.
+    Returns one record per mesh split, and an empty list for the props that make up most
+    files. Detection is by content, not filename: a file is a character here when it holds
+    a single armature carrying a head bone.
     """
     armatures = [obj for obj in bpy.data.objects if obj.type == "ARMATURE"]
     if len(armatures) != 1:
@@ -295,9 +283,9 @@ def split_scene(warnings):
             continue
         base = obj.name
         # glTF node names and bone names share one namespace, so a mesh called Head makes
-        # the exporter rename the *bone* Head to Head_2 and every bone map downstream
-        # stops recognizing the rig. Blender cannot see this coming, since objects and
-        # bones are separate namespaces there.
+        # the exporter rename the *bone* Head to Head_2 and every bone map downstream stops
+        # recognizing the rig. Blender keeps the two in separate namespaces, so it cannot
+        # warn about this.
         collisions = {f"{base}_Body", f"{base}_Head"} & bones
         if collisions:
             warnings.append(f"'{base}' would collide with bone {sorted(collisions)[0]}; not split")

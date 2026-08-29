@@ -24,12 +24,8 @@ TEXTURES = [os.path.join(ROOT, *parts) for parts in (
 class MatchesSuffix(unittest.TestCase):
 
     def test_short_glob_matches_against_a_deeper_path(self):
-        # Every glob in the fixtures above is written as a complete pack-relative path, so
-        # none of them exercise suffix matching itself. A real member glob in
-        # material_overrides.json is one or two segments, matched against a shipped path
-        # that runs deeper, the way "Textures/Leaves/leaf.png" matches a file actually
-        # sitting under "Source Files/Textures/Leaves/leaf.png". Without the leading "*"
-        # fnmatchcase demands the whole string, not just its tail, so this fails.
+        # A real member glob is one or two segments matched against a deeper shipped path.
+        # Without the leading "*", fnmatchcase demands the whole string, not just its tail.
         self.assertTrue(material_flavors.matches_suffix(
             "Source Files/Textures/Leaves/leaf.png", "Textures/Leaves/leaf.png"))
 
@@ -52,10 +48,8 @@ class ExpandSets(unittest.TestCase):
 
     def test_default_must_match_on_a_path_boundary(self):
         # A member whose filename merely ends with the default's filename is not that
-        # default. The fixture is synthetic because no shipped pack pairs names this way
-        # today, but without the boundary both members would resolve as the default, the
-        # set would be dropped as ambiguous, and every model bound to it would go back to
-        # flat white with no error anywhere.
+        # default. Without the boundary both would resolve as the default, the set would be
+        # dropped as ambiguous, and every model bound to it would go back to flat white.
         textures = [os.path.join(ROOT, "Textures", "Castle", name) for name in
                     ("Wall_Brick_01.png", "Reinforced_Wall_Brick_01.png")]
         warnings = []

@@ -36,10 +36,9 @@ SYNONYMS = {"destroyed": "damaged", "broken": "damaged", "wrecked": "damaged",
 MIN_SCORE = 8.0
 MIN_MARGIN = 3.0
 
-# Separates a pack name from a path suffix in an override value, for the cases where the
-# texture a pack asks for is one another pack ships. Synty's biome packs are built on top
-# of the base Nature pack and reference its atlas directly, so the file genuinely lives
-# next door rather than being a name that needs decoding.
+# Separates a pack name from a path suffix in an override value, for when the texture a
+# pack asks for is one another pack ships. Synty's biome packs are built on the base Nature
+# pack and reference its atlas directly, so the file genuinely lives next door.
 FOREIGN_SEPARATOR = "::"
 
 
@@ -114,10 +113,9 @@ def index_textures(root):
 def tail_variants(tokens, max_trim=3):
     """The token list, then progressively shorter versions of it.
 
-    Synty's references often carry an artist's working suffix that never shipped:
-    PolygonCastle_Texture_01_A_Jason against PolygonCastle_Texture_01_A. Trimming from
-    the end recovers those, and a trimmed candidate still has to clear the normal
-    confidence bar before it is accepted.
+    Synty's references often carry an artist's working suffix that never shipped, as in
+    PolygonCastle_Texture_01_A_Jason against PolygonCastle_Texture_01_A. Trimming from the
+    end recovers those; a trimmed candidate still has to clear the normal confidence bar.
     """
     yield tokens
     for trimmed in range(1, max_trim + 1):
@@ -190,9 +188,9 @@ def resolve(reference, textures, overrides=None, foreign=None):
         if name:
             return Match(lookup[name], 100.0 - depth, method)
         # Trimming has already thrown away tokens that might have been the distinguishing
-        # ones, so a single shared trailing token is no longer evidence of anything. It is
-        # how PolygonNatureBiomes_Texture_01_Tom, shorn of its artist suffix, otherwise
-        # lands on Birch_Trunk_Texture: the only candidate ending in "texture".
+        # ones, so one shared trailing token is no longer evidence. It is how
+        # PolygonNatureBiomes_Texture_01_Tom, shorn of its artist suffix, otherwise lands
+        # on Birch_Trunk_Texture: the only candidate ending in "texture".
         found = best_match(tokens, candidates, common, min_run=1 if depth == 0 else 2)
         if found:
             return Match(lookup[found[0]], found[1], "tokens" if depth == 0 else "trimmed")
